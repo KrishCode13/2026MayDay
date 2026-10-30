@@ -1,6 +1,8 @@
 // =====================================================================
 // sprite_rom.v  --  MEMBER 3 (Unified Sprite & HUD Icon ROM)
 // Stores 5-bit palette indices (0 = transparent).
+// Includes explicit POSE_TUG_FLARE (3'd7), high-contrast Bird,
+// flaming Plane Debris, and Parachute Crate sprites.
 // =====================================================================
 module sprite_rom (
     input  wire [2:0] hero_pose,
@@ -28,8 +30,8 @@ module sprite_rom (
 
     localparam [4:0] __ = 5'd0,  KK = 5'd1,  WW = 5'd2,  GG = 5'd4,
                      OO = 5'd5,  DD = 5'd6,  NN = 5'd7,  SS = 5'd8,
-                     BB = 5'd9,  YY = 5'd10, RR = 5'd11, VV = 5'd16,
-                     TT = 5'd17;
+                     BB = 5'd9,  YY = 5'd10, RR = 5'd11, CC = 5'd14,
+                     VV = 5'd16, TT = 5'd17;
 
     localparam [2:0] POSE_FREEFALL  = 3'd0,
                      POSE_OPEN_1    = 3'd1,
@@ -37,7 +39,8 @@ module sprite_rom (
                      POSE_FULL      = 3'd3,
                      POSE_DMG_FLAP1 = 3'd4,
                      POSE_DMG_FLAP2 = 3'd5,
-                     POSE_CRUMPLED  = 3'd6;
+                     POSE_CRUMPLED  = 3'd6,
+                     POSE_TUG_FLARE = 3'd7;
 
     // 1. HERO SPRITE ROM
     wire [3:0] h_col_eff = hero_mirror ? (4'd15 - hero_col) : hero_col;
@@ -175,7 +178,32 @@ module sprite_rom (
                     default: hero_row_bits = 80'd0;
                 endcase
             end
-            default: begin
+            // #12: Explicit Tug / Flare Pose (3'd7) - Full 16-px flared canopy,
+            // bright gold/white tension ribs, taut brake lines, tucked knees!
+            POSE_TUG_FLARE: begin
+                case (hero_row)
+                    5'd0:  hero_row_bits = {__,KK,KK,KK,KK,KK,KK,KK,KK,KK,KK,KK,KK,KK,KK,__};
+                    5'd1:  hero_row_bits = {KK,YY,OO,OO,YY,OO,OO,WW,WW,OO,OO,YY,OO,OO,YY,KK};
+                    5'd2:  hero_row_bits = {KK,OO,OO,DD,YY,OO,OO,WW,WW,OO,OO,YY,DD,OO,OO,KK};
+                    5'd3:  hero_row_bits = {KK,DD,DD,DD,DD,DD,DD,DD,DD,DD,DD,DD,DD,DD,DD,KK};
+                    5'd4:  hero_row_bits = {KK,KK,KK,KK,KK,KK,KK,KK,KK,KK,KK,KK,KK,KK,KK,KK};
+                    5'd5:  hero_row_bits = {__,WW,__,__,GG,__,__,__,__,__,__,GG,__,__,WW,__};
+                    5'd6:  hero_row_bits = {__,__,WW,__,__,GG,__,__,__,__,GG,__,__,WW,__,__};
+                    5'd7:  hero_row_bits = {__,__,__,WW,__,__,GG,__,__,GG,__,__,WW,__,__,__};
+                    5'd8:  hero_row_bits = {__,__,__,__,WW,__,GG,__,__,GG,__,WW,__,__,__,__};
+                    5'd9:  hero_row_bits = {__,__,__,__,YY,WW,__,__,__,__,WW,YY,__,__,__,__};
+                    5'd10: hero_row_bits = {__,__,__,__,SS,WW,KK,KK,KK,KK,WW,SS,__,__,__,__};
+                    5'd11: hero_row_bits = {__,__,__,__,__,WW,SS,SS,SS,SS,WW,__,__,__,__,__};
+                    5'd12: hero_row_bits = {__,__,__,__,__,__,WW,WW,WW,WW,__,__,__,__,__,__};
+                    5'd13: hero_row_bits = {__,__,__,__,__,__,WW,RR,WW,WW,__,__,__,__,__,__};
+                    5'd14: hero_row_bits = {__,__,__,__,__,__,WW,RR,WW,WW,__,__,__,__,__,__};
+                    5'd15: hero_row_bits = {__,__,__,__,__,NN,NN,NN,NN,NN,NN,__,__,__,__,__};
+                    5'd16: hero_row_bits = {__,__,__,__,__,NN,KK,__,__,KK,NN,__,__,__,__,__};
+                    5'd17: hero_row_bits = {__,__,__,__,__,__,CC,__,__,CC,__,__,__,__,__,__};
+                    default: hero_row_bits = 80'd0;
+                endcase
+            end
+            default: begin // POSE_FULL
                 case (hero_row)
                     5'd0:  hero_row_bits = {__,__,__,KK,KK,KK,KK,KK,KK,KK,KK,KK,KK,__,__,__};
                     5'd1:  hero_row_bits = {__,__,KK,OO,OO,OO,OO,OO,OO,OO,OO,OO,OO,KK,__,__};
@@ -204,7 +232,7 @@ module sprite_rom (
         hero_color = hero_row_bits[(4'd15 - h_col_eff) * 5 +: 5];
     end
 
-    // 2. OBSTACLE SPRITE ROM
+    // 2. OBSTACLE SPRITE ROM (#4 High-contrast Bird, Plane, #8 Flaming Debris)
     reg [39:0]  bird_row_bits;
     reg [119:0] plane_row_bits;
     reg [29:0]  debris_row_bits;
@@ -214,22 +242,24 @@ module sprite_rom (
     wire [2:0] debris_col_eff = obs_sel_flip ? (3'd5 - obs_col[2:0]) : obs_col[2:0];
 
     always @* begin
+        // #4: High-contrast 2-frame flapping bird (white/brown wings, black outline, gold beak)
         bird_row_bits = 40'd0;
         if (!obs_sel_frame) begin
             case (obs_row)
-                3'd0: bird_row_bits = {GG,GG,__,__,__,__,GG,GG};
-                3'd1: bird_row_bits = {__,__,GG,__,__,GG,__,__};
-                3'd2: bird_row_bits = {__,__,__,GG,GG,__,__,__};
-                3'd3: bird_row_bits = {__,__,GG,GG,GG,GG,YY,__};
-                3'd4: bird_row_bits = {__,__,__,GG,GG,__,__,__};
+                3'd0: bird_row_bits = {KK,WW,__,__,__,__,WW,KK};
+                3'd1: bird_row_bits = {__,KK,WW,__,__,WW,KK,__};
+                3'd2: bird_row_bits = {__,__,KK,WW,WW,KK,__,__};
+                3'd3: bird_row_bits = {__,KK,BB,WW,WW,KK,YY,YY};
+                3'd4: bird_row_bits = {__,__,KK,KK,KK,__,__,__};
                 default: bird_row_bits = 40'd0;
             endcase
         end else begin
             case (obs_row)
-                3'd1: bird_row_bits = {__,__,__,GG,GG,__,__,__};
-                3'd2: bird_row_bits = {__,__,GG,GG,GG,GG,YY,__};
-                3'd3: bird_row_bits = {__,GG,__,GG,GG,__,GG,__};
-                3'd4: bird_row_bits = {GG,__,__,__,__,__,__,GG};
+                3'd1: bird_row_bits = {__,__,KK,WW,WW,KK,__,__};
+                3'd2: bird_row_bits = {__,KK,BB,WW,WW,KK,YY,YY};
+                3'd3: bird_row_bits = {__,KK,WW,KK,KK,WW,KK,__};
+                3'd4: bird_row_bits = {KK,WW,__,__,__,__,WW,KK};
+                3'd5: bird_row_bits = {KK,__,__,__,__,__,__,KK};
                 default: bird_row_bits = 40'd0;
             endcase
         end
@@ -246,25 +276,26 @@ module sprite_rom (
             3'd7: plane_row_bits = {__,__,__,__,__,__,__,__,__,GG,GG,GG,GG,__,__,__,__,__,__,__,__,__,__,__};
         endcase
 
+        // #8: Falling Plane Debris with flickering trailing fire (RR/OO/YY) & torn fuselage (VV/TT)
         debris_row_bits = 30'd0;
         if (!obs_sel_frame) begin
             case (obs_row)
-                3'd0: debris_row_bits = {RR,OO,__,__,__,__};
-                3'd1: debris_row_bits = {OO,KK,VV,VV,KK,__};
-                3'd2: debris_row_bits = {KK,VV,VV,TT,VV,KK};
-                3'd3: debris_row_bits = {__,KK,VV,VV,VV,KK};
+                3'd0: debris_row_bits = {__,RR,YY,OO,__,__};
+                3'd1: debris_row_bits = {RR,OO,YY,RR,OO,__};
+                3'd2: debris_row_bits = {KK,VV,TT,VV,KK,__};
+                3'd3: debris_row_bits = {KK,TT,RR,VV,VV,KK};
                 3'd4: debris_row_bits = {__,KK,VV,TT,VV,KK};
-                3'd5: debris_row_bits = {__,__,KK,KK,KK,__};
+                3'd5: debris_row_bits = {__,__,KK,VV,KK,__};
                 default: debris_row_bits = 30'd0;
             endcase
         end else begin
             case (obs_row)
-                3'd0: debris_row_bits = {__,__,__,__,OO,RR};
-                3'd1: debris_row_bits = {__,__,KK,VV,KK,OO};
-                3'd2: debris_row_bits = {__,KK,VV,VV,TT,KK};
-                3'd3: debris_row_bits = {KK,VV,TT,VV,VV,KK};
-                3'd4: debris_row_bits = {KK,VV,VV,VV,KK,__};
-                3'd5: debris_row_bits = {__,KK,KK,KK,__,__};
+                3'd0: debris_row_bits = {__,__,OO,YY,RR,__};
+                3'd1: debris_row_bits = {__,OO,RR,YY,OO,RR};
+                3'd2: debris_row_bits = {__,KK,VV,TT,VV,KK};
+                3'd3: debris_row_bits = {KK,VV,VV,RR,TT,KK};
+                3'd4: debris_row_bits = {KK,VV,TT,VV,KK,__};
+                3'd5: debris_row_bits = {__,KK,VV,KK,__,__};
                 default: debris_row_bits = 30'd0;
             endcase
         end
@@ -277,18 +308,18 @@ module sprite_rom (
         endcase
     end
 
-    // 3. CRATE SPRITE ROM
+    // 3. CRATE SPRITE ROM (#3: Orange/White mini-chute + Gold/Brown supply crate)
     reg [29:0] crate_row_bits;
     always @* begin
         case (crate_row)
-            4'd0: crate_row_bits = {__,WW,WW,WW,WW,__};
-            4'd1: crate_row_bits = {WW,WW,WW,WW,WW,WW};
-            4'd2: crate_row_bits = {GG,__,__,__,__,GG};
-            4'd3: crate_row_bits = {__,GG,__,__,GG,__};
+            4'd0: crate_row_bits = {__,OO,WW,WW,OO,__};
+            4'd1: crate_row_bits = {OO,WW,OO,OO,WW,OO};
+            4'd2: crate_row_bits = {WW,__,__,__,__,WW};
+            4'd3: crate_row_bits = {__,WW,__,__,WW,__};
             4'd4: crate_row_bits = {KK,KK,KK,KK,KK,KK};
-            4'd5: crate_row_bits = {KK,BB,YY,BB,BB,KK};
-            4'd6: crate_row_bits = {KK,YY,YY,YY,YY,KK};
-            4'd7: crate_row_bits = {KK,BB,YY,BB,BB,KK};
+            4'd5: crate_row_bits = {KK,YY,BB,BB,YY,KK};
+            4'd6: crate_row_bits = {KK,BB,YY,YY,BB,KK};
+            4'd7: crate_row_bits = {KK,YY,BB,BB,YY,KK};
             4'd8: crate_row_bits = {KK,KK,KK,KK,KK,KK};
             default: crate_row_bits = 30'd0;
         endcase
