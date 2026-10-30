@@ -103,6 +103,54 @@ localparam [15:0] LFSR_CONST_M2 = 16'h5A5A;
 // Difficulty table (per level 1..5) is implemented by Member 2 as a
 // case statement on `level`; values are in docs/ICD.md "Difficulty table".
 
+// ---------------- Inputs (Member 4, input_ctrl.v) ------------------------
+// Define FAST_SIM in a testbench to shrink "1 ms" to 100 cycles (1000x
+// faster sim). Never define it in Vivado synthesis.
+`ifdef FAST_SIM
+localparam SAMPLE_CYCLES    = 100;      // sim: 1 "ms" = 100 clk cycles
+`else
+localparam SAMPLE_CYCLES    = 100000;   // 1 ms at 100 MHz (must be < 131072)
+`endif
+localparam DEBOUNCE_SAMPLES = 5;        // 5 equal 1 ms samples to change a held level
+localparam LOCKOUT_MS       = 200;      // min 200 ms between press pulses (<= 255)
+
+// ---------------- Director menus (Member 4, game_director.v) -------------
+localparam NUM_LEVELS = 5;
+localparam [2:0] MC_NEXT  = 3'd0, MC_RETRY = 3'd1, MC_HOME = 3'd2;  // LEVEL_COMPLETE cursor
+localparam [2:0] MF_RETRY = 3'd0, MF_HOME  = 3'd1;                  // LEVEL_FAILED cursor
+
+// ---------------- Seven-segment (Member 4, seg7_ctrl.v) ------------------
+`ifdef FAST_SIM
+localparam SEG_REFRESH_BITS = 6;        // sim: 16 cycles per digit
+localparam SEG_SPIN_CYCLES  = 200;      // sim: spin-down step
+`else
+localparam SEG_REFRESH_BITS = 18;       // top 2 bits pick the digit: 0.66 ms each, ~380 Hz
+localparam SEG_SPIN_CYCLES  = 2000000;  // 20 ms per crash spin-down step
+`endif
+localparam SEG_SPIN_SHIFT   = 3;        // each step removes value/8 + 1
+localparam SEG_MAX_VALUE    = 9999;     // 4 digits; larger values are clamped
+
+// ---------------- LEDs (Member 4, led_ctrl.v) ----------------------------
+localparam LED_CHASE_BIT = 3;           // chaser steps every 2^3 = 8 ticks (~133 ms)
+localparam LED_FLASH_BIT = 2;           // flashing toggles every 2^2 = 4 ticks (~7.5 Hz)
+localparam WIND_LEN_1 = 3, WIND_LEN_2 = 5, WIND_LEN_3 = 8;   // LEDs lit per gust strength
+
+// ---------------- Cutscene timeline (Member 4, cutscene_engine.v) --------
+// Scene n runs from the previous end tick up to CUT_Sn_END (60 ticks = 1 s).
+localparam CUT_S1_END = 300;            // 1 Boarding   5 s
+localparam CUT_S2_END = 660;            // 2 Briefing   6 s
+localparam CUT_S3_END = 900;            // 3 Flight     4 s
+localparam CUT_S4_END = 1140;           // 4 Explosion  4 s
+localparam CUT_TOTAL  = 1260;           // 5 Jump       2 s  (21 s total)
+localparam CUT_WALK_BIT = 2;            // walking legs swap every 2^2 = 4 ticks
+localparam CUT_FLASH_TICKS = 3;         // white flash frames at the explosion
+localparam CUT_SHAKE_TICKS = 30;        // screen shake length after the explosion
+localparam CUT_SHAKE_PX    = 2;         // shake offset, +/- px
+localparam CUT_PART_LIFE   = 36;        // particle lifetime, ticks
+localparam signed [15:0] CUT_PART_GRAVITY = 16'sd16;  // 0.0625 px/tick^2 added to vy (Q8.8)
+localparam CUT_SMOKE_BIT   = 3;         // one smoke puff every 2^3 = 8 ticks
+localparam CUT_SMOKE_LIFE  = 63;        // smoke puff lifetime, ticks
+
 // ---------------- Timed states (ticks) ---------------------------------
 localparam T_LEVEL_INTRO   = 120;
 localparam T_CRASH_PLUNGE  = 120;
