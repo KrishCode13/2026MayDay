@@ -81,6 +81,9 @@ module palette (
             5'd19: rgb565 = 16'h2709; // Bright green
             5'd20: rgb565 = 16'hDE98; // Cabin beige
             5'd21: rgb565 = 16'h5AEC; // Tarmac
+            5'd22: rgb565 = 16'hB7FF; // Ice-cyan wind streak highlight
+            5'd23: rgb565 = 16'hFD80; // Bright flame amber for plane debris
+            5'd24: rgb565 = 16'h9000; // Deep crimson alert banner background
             default: rgb565 = 16'h0000;
         endcase
     end
