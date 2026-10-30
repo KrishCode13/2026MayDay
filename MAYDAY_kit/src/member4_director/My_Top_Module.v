@@ -143,7 +143,8 @@ module My_Top_Module (
         .seg(seg), .dp(dp), .an(an));
 
     led_ctrl u_led (.clk(clk), .game_tick(game_tick), .game_state(game_state), .state_timer(state_timer),
-        .altitude(altitude), .gust_dir(gust_dir), .gust_strength(gust_strength),
+        .altitude(altitude), .gust_warn(gust_warn), .gust_active(gust_active),
+        .gust_dir(gust_dir), .gust_strength(gust_strength),
         .magnet_active(magnet_active), .magnet_ticks_left(magnet_ticks_left),
         .stars_earned(stars_earned), .led(led));
 endmodule
