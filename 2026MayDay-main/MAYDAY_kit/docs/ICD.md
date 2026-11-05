@@ -3,6 +3,36 @@
 Version: 25 Oct 2026 · Owner: Member 4 (integrator)
 
 
+> **Revision 5. Overrides earlier revisions where they conflict.** Details in `docs/CHANGELOG.md`.
+>
+> - **Keyboard removed.** Board buttons only: BTNL/BTNR steer, BTNU tug, BTNC deploy/land/confirm. No PS/2 pins or ports.
+> - **Flare:** the lane marker freezes where C is pressed (`physics_engine.flare_locked` -> `render_engine.flare_locked`). Red = crash at touchdown (hero lies flat, death tune); yellow = hard landing; green = soft landing; perfect only if green, on the spot, 0 lines snapped. T_CRASH_IMPACT = 150 ticks.
+> - **Landing arrow:** big (18x18) blinking gold arrow over the landing spot for the whole final approach.
+> - **Cutscene:** title card = yellow MAYDAY on a black box in a white screen (no shake). After MISSION, three 2.5 s slides: AVOID BIRDS / GRAB CRATES / LAND ON STAR.
+> - **Sound:** new original 100 bpm pop-style lobby tune (I-V-vi-IV, plucked lead, bouncing bass, kick and clap); gusting wind (swell ~1 s, fade ~2 s, brighter at the peak); death tune in CRASH. `audio_engine` gains a `fail_reason` input.
+
+> **Revision 4 (polish, sound, keyboard). Overrides Revisions 2–3 where they conflict.** Details in `docs/CHANGELOG.md`.
+>
+> - **Inputs:** SW1 = mute (cutscene skip removed). USB keyboard: Left/Right/Up arrows = BTNL/BTNR/BTNU, Down arrow = BTNC; board buttons still work.
+> - **Sound (Pmod AMP2 on JXADC top row):** lobby music in HOME, LEVEL_INTRO, LEVEL_COMPLETE, LEVEL_FAILED, VICTORY; soft wind in CUTSCENE (plus explosion), CANOPY, FINAL_APPROACH; loud wind in freefall and CRASH; 2 s victory jingle in LANDING (now 120 ticks). Both tunes are original compositions.
+> - **Cutscene:** scene 2 is a 1 s white title card with a shaking yellow MAYDAY, then the timeline jumps to the flight scene. Mission screen: AVOID BIRDS / AVOID DEBRIS / COLLECT CRATES.
+> - **Crates:** fall at 0.15 px/tick; no crate spawns below a hero altitude of 200 m (every crate starts at least 150 m above the ground).
+> - **Wind:** no gust starts while a plane is warned or flying, and an active gust stops. Grey wind lines on levels 1 and 3.
+> - **HUD:** navy text on levels 1, 3 and 5; "PRESS C" at rows 26–32 (mid-screen), guidance text at rows 35–41; level 1 landing message "C ON GREEN". HOME prompt: left arrow, right arrow, gold circle, GO.
+> - **New modules / ports:** `audio_engine.v`, `ps2_keyboard.v`; top ports `JXADC[3:0]`, `PS2Clk`, `PS2Data`; `cutscene_engine.explode`; `world_engine.plane_busy` -> `physics_engine.plane_busy`.
+
+> **Revision 3 (easier game). Overrides Revision 2 and the sections below where they conflict.** Details: `docs/CHANGELOG.md`.
+>
+> - **Speeds and altitudes:** canopy 0.3 px/tick (+0.15 per snapped line); start 1,400 m, unlock 1,100 m, perfect deploy 950–850 m, too late 800 m (about 50 s per level). Steering 0.04; gusts capped at strength 2 (level 1: strength 1).
+> - **Levels:** 1 = tutorial, birds/wind/crates, one thing on screen at a time (random order); 2 = birds and wind, harder; 3 = adds debris; 4 = adds planes (every ~12 s); 5 = everything (planes every ~9 s), still beatable.
+> - **Fairness:** levels 1–2 never put two birds in the same entry band; levels 3–5 always keep one side safe (birds join the side of falling debris, debris joins the side of rising birds, birds drift toward their own edge). Nothing else spawns while a plane is warned or flying.
+> - **Warnings:** freefall birds and debris 1 s; planes 2 s, flashing triangle on the side edge. Freefall birds fly straight up; several at once only from level 3.
+> - **Planes:** 0.75 px/tick, fly level at screen row 24 (the hero's body): tug UP (8 px rise) to pass over. Debris own speed halved.
+> - **Medic crates:** green with a white plus, glowing border. Collecting one repairs a snapped line ("REPAIRED!") and always shows a rising star.
+> - **Guidance text** (gold, centre): level 1: AVOID BIRDS / GRAB CRATES / WIND! STEER / PRESS C AT GREEN each time; levels 2–5: STRONGER WIND, DEBRIS ABOVE!, PLANES! TUG UP, FINAL DESCENT once.
+> - **Sunset:** lighter pink-peach sky, cream clouds.
+> - **New ports:** world_engine in `gust_warn`, `gust_active`; out `gust_request`, `pwarn_active`, `pwarn_right`, `pwarn_y`. physics_engine in `crate_collected`, `gust_request`. render_engine in `pwarn_active`, `pwarn_right`, `pwarn_y`.
+
 > **Revision 2 (play-test fixes).** Where this note conflicts with a section below, this note wins. Full details in `docs/CHANGELOG.md`.
 >
 > - **Controls:** BTNU held = brake (tug parachute). BTNL / BTNR = steer only. BTNC = deploy (FREEFALL_WINDOW) **and** landing flare (FINAL_APPROACH). The both-toggles flare is removed.

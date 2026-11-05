@@ -24,6 +24,10 @@ module physics_engine (
     input  wire               steer_right_held,
     input  wire               flare_press,      // NEW (FIX #5): BTNC one-shot press, flare in FINAL_APPROACH
     input  wire               brake_held,       // NEW: BTNU held = tug parachute (brake)
+    input  wire               crate_collected,  // REV3: medic crate repairs one snapped line
+    input  wire               gust_request,     // REV3: level 1 gusts only when world_engine asks
+    input  wire               plane_busy,       // REV4: plane warned or flying -> no wind (so tugging up works)
+    output wire               flare_locked,     // REV5: C was pressed in FINAL_APPROACH (marker freezes)
     // from Member 2
     input  wire               strike,
     input  wire               strike_side,
@@ -68,7 +72,8 @@ module physics_engine (
     reg [1:0]         lines_n;      // work copy for same-tick strike + late deploy
     reg               side_n;
     reg               both_held_d;  // previous tick, for flare rising edge
-    reg               flare_done;   // first both-held edge in FINAL_APPROACH used
+    reg               flare_done;   // first C press in FINAL_APPROACH used
+    assign flare_locked = flare_done;   // REV5
     reg               flare_ok;     // that edge was soft or hard (not a miss)
     reg               flare_ok_n;
     reg               landing_grade_n;
@@ -97,6 +102,20 @@ module physics_engine (
             strike_pend <= 1'b1;
         end else if (game_tick)
             strike_pend <= 1'b0;
+    end
+
+    // REV3: crate_collected and gust_request are also 1-cycle pulses sent just
+    // after a tick, so latch them the same way until the next tick uses them.
+    reg crate_pend, gust_req_pend;
+    always @(posedge clk) begin
+        if (rst || level_start) begin
+            crate_pend <= 1'b0;  gust_req_pend <= 1'b0;
+        end else begin
+            if (crate_collected)  crate_pend <= 1'b1;
+            else if (game_tick)   crate_pend <= 1'b0;
+            if (gust_request)     gust_req_pend <= 1'b1;
+            else if (game_tick && gust_phase != 2'd0) gust_req_pend <= 1'b0;
+        end
     end
 
     // FIX #5: flare_press is a 1-cycle pulse that almost never lands on the
@@ -166,9 +185,7 @@ module physics_engine (
         begin
             case (lv)
                 3'd1:    gust_max = 2'd1;
-                3'd2:    gust_max = 2'd2;
-                3'd3:    gust_max = 2'd2;
-                default: gust_max = 2'd3;
+                default: gust_max = 2'd2;   // REV3: max strength 2 everywhere (steering always wins)
             endcase
         end
     endfunction
@@ -348,6 +365,9 @@ module physics_engine (
                         lines_n = 2'd1;
                 end
             end
+            // REV3: medic crate repairs one line (only if not already collapsed)
+            if (in_flight && crate_pend && (lines_n == 2'd1))
+                lines_n = 2'd0;
             lines_snapped <= lines_n;
             damaged_side  <= side_n;
 
@@ -355,11 +375,21 @@ module physics_engine (
             if (in_canopy) begin
                 if (gust_timer != 9'd0)
                     gust_timer <= gust_timer - 9'd1;
+                // REV4: a plane is warned or flying -> stop any gust at once, so the
+                // wind never fights the player's tug-up over the plane
+                if (plane_busy && (gust_phase != 2'd0)) begin
+                    gust_phase  <= 2'd0;
+                    gust_warn   <= 1'b0;
+                    gust_active <= 1'b0;
+                    gust_timer  <= gust_gap(level);
+                end else
                 case (gust_phase)
                     2'd0: begin
                         gust_warn   <= 1'b0;
                         gust_active <= 1'b0;
-                        if (gust_timer == 9'd0) begin
+                        // REV3: level 1 (tutorial) gusts start only when world_engine
+                        // requests one, so wind never overlaps a bird or crate.
+                        if (((level != 3'd1) ? (gust_timer == 9'd0) : gust_req_pend) && !plane_busy) begin   // REV4
                             gust_phase    <= 2'd1;
                             gust_timer    <= GUST_WARN_TICKS;
                             gust_warn     <= 1'b1;

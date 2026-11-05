@@ -11,7 +11,8 @@ module My_Top_Module (
     output wire [6:0]  seg,
     output wire        dp,
     output wire [3:0]  an,
-    output wire [7:0]  JC            // Pmod OLED
+    output wire [7:0]  JC,           // Pmod OLED
+    output wire [3:0]  JXADC         // REV4: Pmod AMP2 on the XADC header (top row)
 );
     `include "game_params.vh"
 
@@ -25,7 +26,7 @@ module My_Top_Module (
 
     wire rst   = sw[15];
     wire pause = sw[0];
-    wire skip  = sw[1];
+    wire mute  = sw[1];   // REV4: SW1 = mute (cutscene skip removed)
 
     // ---------------- OLED + pixel coordinates ----------------------
     wire        frame_begin, sending_pixels, sample_pixel;
@@ -62,7 +63,8 @@ module My_Top_Module (
 
     wire left_held, right_held, center_held, left_press, right_press, center_press;
     wire up_held, up_press;   // NEW: BTNU = tug parachute (brake)
-    input_ctrl u_in (.clk(clk), .btnL(btnL), .btnR(btnR), .btnC(btnC), .btnU(btnU),
+    input_ctrl u_in (.clk(clk), .btnL(btnL), .btnR(btnR),
+        .btnC(btnC), .btnU(btnU),
         .left_held(left_held), .right_held(right_held), .center_held(center_held), .up_held(up_held),
         .left_press(left_press), .right_press(right_press), .center_press(center_press), .up_press(up_press));
 
@@ -85,12 +87,16 @@ module My_Top_Module (
     wire signed [7:0] warn_x;  wire warn_active, warn_edge;
     wire [7:0]  target_x;
     wire        strike, strike_side, crate_collected, magnet_active;
+    wire        plane_busy;   // REV4
+    wire        explode;      // REV4: cutscene -> audio
+    wire        flare_locked; // REV5: physics -> renderer (C pressed in final approach)
+    wire        gust_request, pwarn_active, pwarn_right;  wire signed [7:0] pwarn_y;   // REV3
     wire [1:0]  strike_lines;  wire [2:0] crates_level_total;  wire [8:0] magnet_ticks_left;
 
     game_director u_dir (
         .clk(clk), .rst(rst), .game_tick(game_tick),
         .left_press(left_press), .right_press(right_press), .center_press(center_press),
-        .sw_skip(skip), .cutscene_done(cutscene_done),
+        .sw_skip(1'b0), .cutscene_done(cutscene_done),
         .altitude(altitude), .hero_crash(hero_crash), .crash_cause(crash_cause),
         .hero_landed(hero_landed), .landing_grade(landing_grade), .landed_on_spot(landed_on_spot),
         .lines_snapped(lines_snapped),
@@ -105,6 +111,9 @@ module My_Top_Module (
         .clk(clk), .rst(rst), .game_tick(game_tick), .game_state(game_state), .level(level),
         .level_start(level_start), .state_timer(state_timer), .seed(seed),
         .steer_left_held(left_held), .steer_right_held(right_held), .flare_press(center_press), .brake_held(up_held), // FIX #5 + BTNU brake
+        .crate_collected(crate_collected), .gust_request(gust_request),   // REV3
+        .plane_busy(plane_busy),   // REV4: no wind while a plane is coming
+        .flare_locked(flare_locked),   // REV5: freeze the flare-lane marker
         .strike(strike), .strike_side(strike_side), .strike_lines(strike_lines), .target_x(target_x),
         .hero_x(hero_x), .hero_y(hero_y), .scroll_vy(scroll_vy), .altitude(altitude),
         .canopy_mode(canopy_mode), .lines_snapped(lines_snapped), .damaged_side(damaged_side),
@@ -118,6 +127,9 @@ module My_Top_Module (
         .level_start(level_start), .seed(seed),
         .hero_x(hero_x), .hero_y(hero_y), .scroll_vy(scroll_vy), .altitude(altitude),
         .canopy_mode(canopy_mode), .deploy_grade(deploy_grade),
+        .gust_warn(gust_warn), .gust_active(gust_active),                 // REV3
+        .gust_request(gust_request), .pwarn_active(pwarn_active), .pwarn_right(pwarn_right), .pwarn_y(pwarn_y),
+        .plane_busy(plane_busy),   // REV4
         .obs_x(obs_x), .obs_y(obs_y), .obs_type(obs_type), .obs_active(obs_active), .obs_flip(obs_flip),
         .crate_x(crate_x), .crate_y(crate_y), .crate_active(crate_active),
         .warn_x(warn_x), .warn_active(warn_active), .warn_edge(warn_edge), .target_x(target_x),
@@ -141,12 +153,21 @@ module My_Top_Module (
         .warn_x(warn_x), .warn_active(warn_active), .warn_edge(warn_edge), .target_x(target_x),
         .strike(strike), .crate_collected(crate_collected), .crates_level_total(crates_level_total),
         .magnet_active(magnet_active),
+        .pwarn_active(pwarn_active), .pwarn_right(pwarn_right), .pwarn_y(pwarn_y),   // REV3
+        .flare_locked(flare_locked),   // REV5
         .oled_data_game(oled_data_game));
 
     // ---------------- Member 4: cutscene + displays -----------------
     cutscene_engine u_cut (
         .clk(clk), .rst(rst), .game_tick(game_tick), .game_state(game_state), .level(level),
-        .pixel_x(pixel_x), .pixel_y(pixel_y), .oled_data_cut(oled_data_cut), .cutscene_done(cutscene_done));
+        .pixel_x(pixel_x), .pixel_y(pixel_y), .oled_data_cut(oled_data_cut), .cutscene_done(cutscene_done),
+        .explode(explode));
+
+    // REV4: sound on the Pmod AMP2 (JXADC top row: 1 = AIN, 2 = GAIN, 3 = n/c, 4 = SHUTDOWN)
+    audio_engine u_audio (.clk(clk), .rst(rst), .game_state(game_state), .explode(explode), .mute(mute),
+        .fail_reason(fail_reason),
+        .amp_ain(JXADC[0]), .amp_gain(JXADC[1]), .amp_shutdown_n(JXADC[3]));
+    assign JXADC[2] = 1'b0;
 
     assign oled_data = (game_state == S_CUTSCENE) ? oled_data_cut : oled_data_game;
 

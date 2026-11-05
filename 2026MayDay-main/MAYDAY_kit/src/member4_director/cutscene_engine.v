@@ -42,7 +42,8 @@ module cutscene_engine (
     input  wire [6:0]  pixel_x,
     input  wire [5:0]  pixel_y,
     output reg  [15:0] oled_data_cut,
-    output reg         cutscene_done   // high when the last scene AND the two text screens end
+    output reg         cutscene_done,  // high when the last scene AND the two text screens end
+    output reg         explode = 1'b0  // REV4: 1-cycle pulse when the plane explodes (audio)
 );
     `include "game_params.vh"
 
@@ -156,31 +157,34 @@ module cutscene_engine (
     // =================================================================
     reg        jump_done;
     reg [1:0]  slow_cnt;
-    reg [8:0]  txt_t;
+    reg [9:0]  txt_t;   // REV5: 10 bits (controls + mission + 3 slides = 870 ticks)
     wire       in_jump  = (t >= CUT_S4_END);
     wire       cut_tick = game_tick && !jump_done && (!in_jump || (slow_cnt == 2'd0));
     initial begin jump_done = 0; slow_cnt = 0; txt_t = 0; cutscene_done = 0; end
 
     always @(posedge clk) begin
         if (rst || game_state != S_CUTSCENE) begin
-            slow_cnt <= 2'd0;  txt_t <= 9'd0;  cutscene_done <= 1'b0;
+            slow_cnt <= 2'd0;  txt_t <= 10'd0;  cutscene_done <= 1'b0;
         end else if (game_tick) begin
             slow_cnt <= (slow_cnt == CUT_JUMP_SLOW - 1) ? 2'd0 : slow_cnt + 2'd1;
             if (jump_done) begin
-                txt_t <= txt_t + 9'd1;
-                if (txt_t >= CUT_CTRL_TICKS + CUT_GOAL_TICKS - 1) cutscene_done <= 1'b1;
+                txt_t <= txt_t + 10'd1;
+                if (txt_t >= CUT_CTRL_TICKS + CUT_GOAL_TICKS + 3*CUT_SLIDE_TICKS - 1) cutscene_done <= 1'b1;
             end
         end
     end
 
     always @(posedge clk) begin
+        explode <= 1'b0;
         if (rst || game_state != S_CUTSCENE) begin
             // Idle: rewind everything so the next play starts fresh.
             t <= 11'd0;  kf_ptr <= 6'd0;  vis <= 0;  jump_done <= 1'b0;
             for (k = 0; k < NOBJ; k = k + 1) cnt[k] <= 9'd0;
         end else if (cut_tick) begin   // NEW: was game_tick (slow-mo jump, frozen during text)
             // MOVER: one step for every moving object, once per tick.
-            t <= t + 1'b1;
+            // REV4: scene 2 is a 1 s title card; then skip the rest of scene 2
+            t <= (t == CUT_S1_END + CUT_TITLE_TICKS - 1) ? CUT_S2_END[10:0] : t + 1'b1;
+            explode <= (t == CUT_S3_END - 1);   // REV4: explosion sound trigger
             if (t >= CUT_TOTAL - 1) jump_done <= 1'b1;
             for (k = 0; k < NOBJ; k = k + 1)
                 if (cnt[k] != 9'd0) begin
@@ -591,7 +595,7 @@ module cutscene_engine (
         case (idx)
             5'd1:  pal = 16'h0000;
             5'd2:  pal = 16'hFFFF;
-            5'd3:  pal = (set == 2'd0) ? 16'hDEDB : (set == 2'd1) ? 16'h298A : 16'hF518;
+            5'd3:  pal = (set == 2'd0) ? 16'hDEDB : (set == 2'd1) ? 16'h298A : 16'hFF9B;   // REV3 sunset clouds
             5'd4:  pal = (set == 2'd1) ? 16'hC618 : 16'h528A;
             5'd5:  pal = 16'hFC60;
             5'd6:  pal = 16'hC280;
@@ -628,13 +632,28 @@ module cutscene_engine (
                 (v < 7'd78) ? 4'd12 : (v < 7'd84) ? 4'd13 : (v < 7'd90) ? 4'd14 : 4'd15;
     endfunction
 
-    wire        scr = (txt_t >= CUT_CTRL_TICKS);      // 0 = controls, 1 = mission
+    wire        scr = (txt_t >= CUT_CTRL_TICKS);      // 0 = controls, 1 = mission (and slides)
+    // REV5: 3 tutorial slides after MISSION: 1 avoid birds, 2 grab crates, 3 land on the star
+    wire [1:0]  slide = (txt_t < CUT_CTRL_TICKS + CUT_GOAL_TICKS) ? 2'd0 :
+                        (txt_t < CUT_CTRL_TICKS + CUT_GOAL_TICKS + CUT_SLIDE_TICKS) ? 2'd1 :
+                        (txt_t < CUT_CTRL_TICKS + CUT_GOAL_TICKS + 2*CUT_SLIDE_TICKS) ? 2'd2 : 2'd3;
+    // REV4 title card state
+    reg         title_mode;
+    reg  [6:0]  tl_x0;  reg [5:0] tl_y0;
+    wire [47:0] title_str = "MAYDAY";
+    reg  signed [2:0] sh_x, sh_y;
+    always @* begin                                   // shake pattern, changes every tick
+        case (t[1:0]) 2'd0: sh_x = -3'sd2; 2'd1: sh_x = 3'sd1; 2'd2: sh_x = 3'sd2; default: sh_x = -3'sd1; endcase
+        case (t[2:1]) 2'd0: sh_y = 3'sd1; 2'd1: sh_y = -3'sd2; 2'd2: sh_y = -3'sd1; default: sh_y = 3'sd2; endcase
+    end
+    reg b_title = 1'b0;
     reg  [127:0] l_str;  reg [4:0] l_len;  reg [6:0] l_x0;  reg l_on, l_gold;
     reg  [5:0]  l_y0;
     reg  [6:0]  tx_c;    reg [3:0] ci;     reg [6:0] crem;
     reg  [7:0]  t_char;  reg [2:0] t_row, t_col;  reg t_valid;
     always @* begin
         l_on = 1'b1;  l_gold = 1'b0;  l_str = 128'd0;  l_len = 5'd0;  l_x0 = 7'd0;  l_y0 = 6'd0;
+        title_mode = (a_scene == 3'd2);
         if      (a_y >= 6'd4  && a_y < 6'd11) begin l_y0 = 6'd4;  l_gold = 1'b1;
             if (!scr) begin l_str = "CONTROLS";       l_len = 5'd8;  l_x0 = 7'd24; end
             else      begin l_str = "MISSION";        l_len = 5'd7;  l_x0 = 7'd27; end end
@@ -643,11 +662,31 @@ module cutscene_engine (
             else      begin l_str = "AVOID BIRDS";    l_len = 5'd11; l_x0 = 7'd15; end end
         else if (a_y >= 6'd32 && a_y < 6'd39) begin l_y0 = 6'd32;
             if (!scr) begin l_str = "L/R: STEER";     l_len = 5'd10; l_x0 = 7'd6;  end
-            else      begin l_str = "AND DEBRIS";     l_len = 5'd10; l_x0 = 7'd18; end end
+            else      begin l_str = "AVOID DEBRIS";   l_len = 5'd12; l_x0 = 7'd12; end end   // REV4
         else if (a_y >= 6'd44 && a_y < 6'd51) begin l_y0 = 6'd44;
             if (!scr) begin l_str = "C  : OPEN/LAND"; l_len = 5'd14; l_x0 = 7'd6;  end
             else      begin l_str = "COLLECT CRATES"; l_len = 5'd14; l_x0 = 7'd6;  end end
         else l_on = 1'b0;
+
+        // REV5: slides have a gold title (row 4) and a white caption (row 53)
+        if (slide != 2'd0) begin
+            l_on = 1'b0;  l_gold = 1'b0;
+            if (a_y >= 6'd4 && a_y < 6'd11) begin
+                l_on = 1'b1;  l_y0 = 6'd4;  l_gold = 1'b1;
+                case (slide)
+                    2'd1:    begin l_str = "AVOID BIRDS";  l_len = 5'd11; l_x0 = 7'd15; end
+                    2'd2:    begin l_str = "GRAB CRATES";  l_len = 5'd11; l_x0 = 7'd15; end
+                    default: begin l_str = "LAND ON STAR"; l_len = 5'd12; l_x0 = 7'd12; end
+                endcase
+            end else if (a_y >= 6'd53 && a_y < 6'd60) begin
+                l_on = 1'b1;  l_y0 = 6'd53;
+                case (slide)
+                    2'd1:    begin l_str = "STEER AWAY";       l_len = 5'd10; l_x0 = 7'd18; end
+                    2'd2:    begin l_str = "THEY HEAL YOU";    l_len = 5'd13; l_x0 = 7'd9;  end
+                    default: begin l_str = "PRESS C ON GREEN"; l_len = 5'd16; l_x0 = 7'd0;  end
+                endcase
+            end
+        end
 
         tx_c   = a_x - l_x0;
         ci     = div6c(tx_c);
@@ -656,19 +695,136 @@ module cutscene_engine (
         t_char = l_str[8*(l_len - 1 - ci) +: 8];
         t_row  = a_y - l_y0;
         t_col  = crem[2:0];
+        // REV4: title card - "MAYDAY" at double size, centred, with an
+        // earthquake shake (offset changes every tick from the tick counter)
+        if (title_mode) begin
+            tl_x0  = 7'd13;        // REV5: no shake; 6 chars x 12 px = 70 px wide
+            tl_y0  = 6'd25;        // 14 px tall
+            tx_c   = (a_x - tl_x0) >> 1;
+            ci     = div6c(tx_c);
+            crem   = tx_c - ci * 7'd6;
+            t_valid = (a_x >= tl_x0) && (a_y >= tl_y0) && (a_y < tl_y0 + 6'd14) &&
+                      (ci < 4'd6) && (crem < 7'd5);
+            t_char = title_str[8*(5 - ci) +: 8];
+            t_row  = (a_y - tl_y0) >> 1;
+            t_col  = crem[2:0];
+            l_gold = 1'b1;
+        end
     end
 
     wire [4:0] t_pix;
     font_rom u_cut_font (.char_code(t_char), .row(t_row), .pixels(t_pix));
 
+    // ---------------- REV5 slide pictures ----------------
+    // codes: 0 none, 1 black, 2 white, 3 grey, 4 gold, 5 green, 6 red
+    function [2:0] sl_bird; input [3:0] r; input [3:0] c;
+        reg [23:0] row;
+        begin
+            case (r)
+                4'd0: row = 24'o33000033;
+                4'd1: row = 24'o00300300;
+                4'd2: row = 24'o00033000;
+                4'd3: row = 24'o00333340;
+                4'd4: row = 24'o00033000;
+                4'd5: row = 24'o00000000;
+                default: row = 24'd0;
+            endcase
+            sl_bird = row[3*(7 - c) +: 3];
+        end
+    endfunction
+    function [2:0] sl_crate; input [3:0] r; input [3:0] c;
+        reg [17:0] row;
+        begin
+            case (r)
+                4'd0: row = 18'o022220;
+                4'd1: row = 18'o222222;
+                4'd2: row = 18'o300003;
+                4'd3: row = 18'o030030;
+                4'd4: row = 18'o111111;
+                4'd5: row = 18'o152251;
+                4'd6: row = 18'o122221;
+                4'd7: row = 18'o152251;
+                4'd8: row = 18'o111111;
+                default: row = 18'd0;
+            endcase
+            sl_crate = row[3*(5 - c) +: 3];
+        end
+    endfunction
+    function [2:0] sl_star; input [3:0] r; input [3:0] c;
+        reg [26:0] row;
+        begin
+            case (r)
+                4'd0: row = 27'o000040000;
+                4'd1: row = 27'o000444000;
+                4'd2: row = 27'o000444000;
+                4'd3: row = 27'o444444444;
+                4'd4: row = 27'o044444440;
+                4'd5: row = 27'o004444400;
+                4'd6: row = 27'o004404400;
+                4'd7: row = 27'o044000440;
+                4'd8: row = 27'o440000044;
+                default: row = 27'd0;
+            endcase
+            sl_star = row[3*(8 - c) +: 3];
+        end
+    endfunction
+    function [3:0] div3; input [5:0] v;   // 0..47 / 3 without a divider
+        div3 = (v < 3) ? 0 : (v < 6) ? 1 : (v < 9) ? 2 : (v < 12) ? 3 : (v < 15) ? 4 : (v < 18) ? 5 :
+               (v < 21) ? 6 : (v < 24) ? 7 : (v < 27) ? 8 : (v < 30) ? 9 : (v < 33) ? 10 : 11;
+    endfunction
+    reg [2:0]  pic;          // picture colour code for this pixel
+    reg [6:0]  px_r;  reg [5:0] py_r;
+    always @* begin
+        pic = 3'd0;  px_r = 7'd0;  py_r = 6'd0;
+        if (jump_done) case (slide)
+            2'd1: if (a_x >= 7'd32 && a_x < 7'd64 && a_y >= 6'd20 && a_y < 6'd44) begin   // bird x4
+                      px_r = a_x - 7'd32;  py_r = a_y - 6'd20;
+                      pic  = sl_bird(py_r[4:2], px_r[4:2]);
+                  end
+            2'd2: if (a_x >= 7'd39 && a_x < 7'd57 && a_y >= 6'd16 && a_y < 6'd43) begin   // crate x3
+                      px_r = a_x - 7'd39;  py_r = a_y - 6'd16;
+                      pic  = sl_crate(div3(py_r), div3({1'b0, px_r[4:0]}));
+                  end
+            2'd3: begin
+                      if (a_x >= 7'd30 && a_x < 7'd48 && a_y >= 6'd17 && a_y < 6'd35) begin    // star x2
+                          px_r = a_x - 7'd30;  py_r = a_y - 6'd17;
+                          pic  = sl_star(py_r[4:1], px_r[4:1]);
+                      end else if (a_y >= 6'd38 && a_y < 6'd41 && a_x >= 7'd23 && a_x < 7'd55)
+                          pic = (a_x >= 7'd35 && a_x < 7'd43) ? 3'd4 : 3'd6;                 // landing tile
+                      else if (a_y >= 6'd41 && a_y < 6'd47 && a_x >= 7'd8 && a_x < 7'd70)
+                          pic = 3'd5;                                                          // grass
+                      else if (a_x >= 7'd78 && a_x < 7'd84 && a_y >= 6'd16 && a_y < 6'd48)      // mini flare lane
+                          pic = (a_y >= 6'd35 && a_y < 6'd38) ? 3'd1 :                         // frozen marker
+                                (a_y < 6'd30) ? 3'd6 : (a_y < 6'd33) ? 3'd4 :
+                                (a_y < 6'd42) ? 3'd5 : (a_y < 6'd45) ? 3'd4 : 3'd6;
+                  end
+            default: ;
+        endcase
+    end
+    function [15:0] pic_rgb; input [2:0] c;
+        case (c)
+            3'd1: pic_rgb = 16'h0000;  3'd2: pic_rgb = 16'hFFFF;  3'd3: pic_rgb = 16'hA514;
+            3'd4: pic_rgb = 16'hFEA0;  3'd5: pic_rgb = 16'h2709;  default: pic_rgb = 16'hE104;
+        endcase
+    endfunction
+    reg [2:0] b_pic = 3'd0;
+    reg       b_rect = 1'b0;     // REV5: black box behind the title
+    always @(posedge clk) begin
+        b_pic  <= pic;
+        b_rect <= (a_x >= 7'd7) && (a_x < 7'd89) && (a_y >= 6'd19) && (a_y < 6'd45);
+    end
+
     reg b_txt_on = 1'b0, b_txt_gold = 1'b0;
     always @(posedge clk) begin
         b_txt_on   <= t_valid && t_pix[3'd4 - t_col];
         b_txt_gold <= l_gold;
+        b_title    <= title_mode;
     end
 
     // Output: text screens after the jump, otherwise the animated scene.
     always @(posedge clk)
-        oled_data_cut <= !jump_done ? pal(b_idx, b_set) :
+        oled_data_cut <= b_title    ? (b_txt_on ? 16'hFEA0 : b_rect ? 16'h0000 : 16'hFFFF) :   // REV5: yellow MAYDAY on a black box
+                         (jump_done && b_pic != 3'd0) ? pic_rgb(b_pic) :                       // REV5 slide pictures
+                         !jump_done ? pal(b_idx, b_set) :
                          b_txt_on   ? (b_txt_gold ? 16'hFEA0 : 16'hFFFF) : 16'h194D;
 endmodule

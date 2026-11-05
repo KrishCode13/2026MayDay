@@ -1,4 +1,66 @@
-# MAYDAY changelog: play-test fixes (Revision 2)
+# MAYDAY changelog
+
+## Revision 5 (latest)
+
+| Item | Change | Owner / file |
+|---|---|---|
+| Keyboard | Removed completely (ps2_keyboard.v deleted, ports and pins removed) | My_Top_Module.v, mayday.xdc (Sathya) |
+| Wind sounded like static | Noise through a 2-pole low-pass; loudness and brightness follow a gust envelope (swell ~1 s, fade ~2 s, random peak); loud wind uses the same gusts, louder | audio_engine.v (Sathya) |
+| How to get 3 stars | Three tutorial slides after MISSION: AVOID BIRDS (bird), GRAB CRATES (medic crate), LAND ON STAR (star, landing tile, flare lane) | cutscene_engine.v (Sathya) |
+| Landing spot unclear | Big blinking gold arrow (18x18) over the landing spot through the whole final approach | render_engine.v, sprite_rom.v (Ruben) |
+| Flare marker kept moving | Marker freezes where C is pressed; red press = crash at touchdown, hero lies flat, death tune | physics_engine.v (Caleb), render_engine.v (Ruben), audio_engine.v (Sathya) |
+| Lobby music | New original 100 bpm pop-style groove (I-V-vi-IV, plucked lead, 3-3-2 bass, kick + clap) | audio_engine.v (Sathya) |
+| Title card | Yellow MAYDAY on a black box in a white screen, no shake | cutscene_engine.v (Sathya) |
+
+**Verified in simulation:** full design compiles; audio recorded with every sound at a sensible level and the wind swelling periodically; title card, three slides, frozen marker, blinking big arrow and lying hero captured from the real renderer and cutscene.
+
+---
+
+
+## Revision 4: polish, sound, keyboard (latest)
+
+| Item | Change | Owner / file |
+|---|---|---|
+| White screen in cutscene | Unfinished 6 s briefing replaced by a 1 s white title card, yellow MAYDAY with an earthquake shake; timeline then jumps to the flight | cutscene_engine.v (Sathya) |
+| Mission screen | AVOID BIRDS / AVOID DEBRIS / COLLECT CRATES | cutscene_engine.v (Sathya) |
+| Crate below the ground | Crates fall 0.15 (was 0.25: they barely rose); none spawn below 200 m hero altitude (crate >= 150 m above ground); crate gaps 450/380/380/300 so all crates still appear | world_engine.v (Arun), game_params.vh |
+| Wind invisible on day levels | Grey wind lines on levels 1 and 3 | render_engine.v (Ruben) |
+| Text hard to read | Navy HUD text on levels 1, 3, 5 | render_engine.v (Ruben) |
+| PRESS C position | Mid-screen (rows 26–32); guidance text moved just below; "C ON GREEN" | render_engine.v (Ruben) |
+| HOME prompt | Left/right arrow icons, gold circle, GO | render_engine.v (Ruben) |
+| Wind fights the plane dodge | No gust while a plane is warned or flying; an active gust stops | world_engine.v (Arun), physics_engine.v (Caleb) |
+| Planes sometimes absent in level 5 | When a plane is due, new obstacles are held back so it always gets its turn | world_engine.v (Arun) |
+| Sound | NEW audio_engine.v: original lobby tune and victory jingle (2 square-wave voices), noise-based soft/loud wind and explosion, delta-sigma output to the Pmod AMP2; SW1 mute | audio_engine.v (Sathya) |
+| Keyboard | NEW ps2_keyboard.v: PS/2 frame receiver + scan-code decoder; arrows merged with the board buttons (Down = centre) | ps2_keyboard.v, My_Top_Module.v (Sathya) |
+
+**Verified in simulation:** keyboard decoder (press, release, two keys at once, other keys ignored); all four sounds recorded to `mayday_audio_preview.wav` with balanced levels; title card and mission screen captured; HOME prompt and HUD colours captured; all 5 levels completed with every crate spawned (lowest crate >= 218 m above ground) and zero fairness violations.
+
+---
+
+
+## Revision 3: easier, fairer, guided (latest)
+
+| Feedback | What changed | Owner / file |
+|---|---|---|
+| Too hard / falling too fast | Canopy 0.5 -> 0.3 px/tick; damage +0.25 -> +0.15; altitudes rescaled (1,400 / 1,100 / 950-850 / 800 m) to keep ~50 s levels | game_params.vh (Sathya) |
+| Planes too fast and sudden | Half speed; 2 s side-edge warning; fly level at the hero's body height so tugging UP clears them; only levels 4-5, on their own timer; nothing else spawns around a plane | world_engine.v (Arun), render_engine.v (Ruben) |
+| Two birds = unavoidable | Levels 1-2: never two birds in the same band. Levels 3-5: one side always safe, across birds AND debris; birds drift toward their own edge | world_engine.v (Arun) |
+| Freefall birds | Straight up; one at a time in levels 1-2 | world_engine.v (Arun) |
+| Debris too sudden | Own speed halved; 1 s warning (kept) | game_params.vh |
+| Level 1 tutorial | One thing on screen at a time (bird, crate or gust) in random order; gusts requested by world_engine | world_engine.v (Arun), physics_engine.v (Caleb) |
+| Level contents | L1-2 birds + wind, L3 + debris, L4 + planes, L5 everything (beatable) | world_engine.v (Arun) |
+| Guidance text | Tutorial messages in level 1; one "new element" message in levels 2-5; REPAIRED! | render_engine.v (Ruben) |
+| Crates | Green medic crate with white plus and glowing border; repairs a line; rising star pop-up; spawn spacing fixed so all crates appear | sprite_rom.v, render_engine.v (Ruben); physics_engine.v (Caleb); world_engine.v (Arun) |
+| Sunset birds hard to see | Lighter pink-peach sky, cream clouds | render_engine.v, palette.v (Ruben); cutscene_engine.v (Sathya) |
+| Wind | Max strength 2 everywhere (1 in level 1); steering 0.03 -> 0.04 so steering always wins | physics_engine.v (Caleb), game_params.vh |
+
+**Verified in simulation:** an autopilot completed all 5 levels on the first try. Fairness checks (level 1 one-thing, level 1-2 band, level 3-5 safe side) were all zero. Every crate spawned (3/3, 3/3, 4/4, 4/4, 5/5); crate repairs and plane warnings occurred. Real-renderer frames checked: medic crate, star pop-up, text, plane and warning, sunset sky.
+
+**Tuning knobs** (all in world_engine.v level table or game_params.vh): `cfg_plane_gap` (720 / 540 ticks), `cfg_spawn_interval`, `cfg_max_obs`, `cfg_crate_interval`, `PLANE_Y`, `V_CANOPY`.
+
+---
+
+## Revision 2: play-test fixes
 
 Every change is marked in the code with a `// FIX #n` or `// NEW` comment explaining what and why.
 Each member should read their own section before the Q&A.

@@ -58,10 +58,10 @@ localparam FLARE_LANE_X = 86;     // lane occupies x 86..91
 // ---------------- Physics (Member 1), Q8.8 -----------------------------
 localparam signed [15:0] V_FREEFALL   = 16'sd512;  // 2.0 px/tick
 localparam signed [15:0] GRAVITY      = 16'sd13;   // 0.05 px/tick^2
-localparam signed [15:0] V_CANOPY     = 16'sd128;  // 0.5
-localparam signed [15:0] V_DAMAGE     = 16'sd64;   // +0.25 per snapped line
+localparam signed [15:0] V_CANOPY     = 16'sd77;   // 0.3  (REV3: was 0.5, slower = more time to dodge)
+localparam signed [15:0] V_DAMAGE     = 16'sd38;   // +0.15 per snapped line (REV3: was 0.25)
 localparam signed [15:0] V_STALL      = 16'sd384;  // 1.5
-localparam signed [15:0] STEER_ACC    = 16'sd8;    // 0.03 (half in freefall)
+localparam signed [15:0] STEER_ACC    = 16'sd10;   // 0.04 (half in freefall) (REV3: beats a strength-2 gust)
 localparam               DRAG_SHIFT   = 4;         // vx = vx - (vx >>> 4)
 localparam signed [15:0] GUST_ACC_1   = 16'sd4;    // 0.015
 localparam signed [15:0] GUST_ACC_2   = 16'sd8;    // 0.03
@@ -76,18 +76,18 @@ localparam STALL_HOLD      = 60;
 localparam STALL_TICKS     = 60;
 localparam [15:0] LFSR_CONST_M1 = 16'hA5A5;
 // FIX #13: gust gaps halved (were 360/300/240/210/180 ticks in physics_engine).
-localparam [8:0] GUST_GAP_L1 = 9'd180;  // 3.0 s
+localparam [8:0] GUST_GAP_L1 = 9'd180;  // 3.0 s (level 1 gusts are requested by world_engine instead)
 localparam [8:0] GUST_GAP_L2 = 9'd150;  // 2.5 s
 localparam [8:0] GUST_GAP_L3 = 9'd120;  // 2.0 s
 localparam [8:0] GUST_GAP_L4 = 9'd105;  // 1.75 s
 localparam [8:0] GUST_GAP_L5 = 9'd90;   // 1.5 s
 
 // ---------------- Altitudes (whole metres; compare with altitude[23:8]) --
-localparam [15:0] ALT_START        = 16'd2000;
-localparam [15:0] ALT_UNLOCK       = 16'd1700;
-localparam [15:0] ALT_PERFECT_HI   = 16'd1550;
-localparam [15:0] ALT_PERFECT_LO   = 16'd1450;
-localparam [15:0] ALT_TOO_LATE     = 16'd1400;
+localparam [15:0] ALT_START        = 16'd1400;   // REV3 (was 2000): keeps ~50 s levels at the slower fall
+localparam [15:0] ALT_UNLOCK       = 16'd1100;   // REV3 (was 1700)
+localparam [15:0] ALT_PERFECT_HI   = 16'd950;    // REV3 (was 1550)
+localparam [15:0] ALT_PERFECT_LO   = 16'd850;    // REV3 (was 1450)
+localparam [15:0] ALT_TOO_LATE     = 16'd800;    // REV3 (was 1400)
 localparam [15:0] ALT_FINAL        = 16'd150;
 // FIX #2: flare windows widened (were soft 15-5, hard 25-15 / 5-1).
 localparam [15:0] FLARE_SOFT_HI    = 16'd18;
@@ -100,14 +100,22 @@ localparam [15:0] SLOWMO_ALT       = 16'd30;
 localparam        SLOWMO_DIV       = 3;
 
 // ---------------- World (Member 2) --------------------------------------
-localparam signed [15:0] CRATE_FALL   = 16'sd64;   // 0.25
-localparam signed [15:0] BIRD_VX      = 16'sd77;   // ~0.3
-localparam signed [15:0] PLANE_VX     = 16'sd384;  // 1.5
-localparam signed [15:0] DEBRIS_VY    = 16'sd256;  // 1.0 down-screen
+localparam signed [15:0] CRATE_FALL   = 16'sd38;   // 0.15 (REV4: was 0.25; at the 0.3 canopy speed crates barely rose)
+localparam signed [15:0] BIRD_VX      = 16'sd26;   // ~0.1 (REV3: was 0.3; gentle diagonal keeps the safe side safe)
+localparam signed [15:0] PLANE_VX     = 16'sd192;  // 0.75 (REV3: was 1.5, ~2 s to cross)
+localparam signed [15:0] DEBRIS_VY    = 16'sd128;  // 0.5 (REV3: was 1.0; net 0.2 px/tick down under canopy)
 localparam signed [15:0] MAGNET_FAR   = 16'sd64;   // 0.25 (Manhattan 16..32)
 localparam signed [15:0] MAGNET_NEAR  = 16'sd192;  // 0.75 (Manhattan < 16)
 localparam MAGNET_TICKS      = 300;
 localparam WARN_TICKS        = 60;
+// ---- REV3 (easier game) ----
+localparam PLANE_WARN_TICKS  = 120;  // 2 s side-edge warning before a plane
+localparam [15:0] CRATE_LAST_ALT = 16'd200;  // REV4: no crate spawns below this hero altitude -> every crate
+                                            // starts >= 150 m above the ground (spawn row is 44 m below the hero)
+localparam PLANE_Y           = 24;   // planes fly level at the hero's body height: TUG UP (8 px) to pass over
+localparam BAND_GAP          = 24;   // px: obstacles closer than this vertically share a "band"
+localparam L1_GAP_TICKS      = 90;   // level 1 tutorial: pause between single items
+localparam TEXT_TICKS        = 180;  // guidance text stays 3 s
 localparam CRATE_SPAWN_RANGE = 32;   // spawn within +/-32 px of hero_x
 localparam CRATE_X_MIN = 8, CRATE_X_MAX = 82;
 localparam [15:0] LFSR_CONST_M2 = 16'h5A5A;
@@ -149,7 +157,8 @@ localparam WIND_LEN_1 = 3, WIND_LEN_2 = 5, WIND_LEN_3 = 8;   // LEDs lit per gus
 // ---------------- Cutscene timeline (Member 4, cutscene_engine.v) --------
 // Scene n runs from the previous end tick up to CUT_Sn_END (60 ticks = 1 s).
 localparam CUT_S1_END = 300;            // 1 Boarding   5 s
-localparam CUT_S2_END = 660;            // 2 Briefing   6 s
+localparam CUT_S2_END = 660;            // 2 Title card (REV4: shows 1 s, then time jumps to CUT_S2_END)
+localparam CUT_TITLE_TICKS = 60;        // REV4: shaking MAYDAY title, 1 s (replaces the blank 6 s briefing)
 localparam CUT_S3_END = 900;            // 3 Flight     4 s
 localparam CUT_S4_END = 1140;           // 4 Explosion  4 s
 localparam CUT_TOTAL  = 1260;           // 5 Jump       2 s  (21 s total)
@@ -157,6 +166,7 @@ localparam CUT_TOTAL  = 1260;           // 5 Jump       2 s  (21 s total)
 localparam CUT_JUMP_SLOW  = 3;          // scene 5 advances 1 step every 3 ticks (1/3 speed)
 localparam CUT_CTRL_TICKS = 240;        // "CONTROLS" screen, 4 s
 localparam CUT_GOAL_TICKS = 180;        // "MISSION" screen, 3 s
+localparam CUT_SLIDE_TICKS = 150;       // REV5: each of the 3 "how to get 3 stars" slides, 2.5 s
 localparam CUT_WALK_BIT = 2;            // walking legs swap every 2^2 = 4 ticks
 localparam CUT_FLASH_TICKS = 3;         // white flash frames at the explosion
 localparam CUT_SHAKE_TICKS = 30;        // screen shake length after the explosion
@@ -169,8 +179,8 @@ localparam CUT_SMOKE_LIFE  = 63;        // smoke puff lifetime, ticks
 // ---------------- Timed states (ticks) ---------------------------------
 localparam T_LEVEL_INTRO   = 120;
 localparam T_CRASH_PLUNGE  = 120;
-localparam T_CRASH_IMPACT  = 30;
-localparam T_LANDING       = 90;
+localparam T_CRASH_IMPACT  = 150;   // REV5: hero lies on the ground while the death tune plays (was 30)
+localparam T_LANDING       = 120;   // REV4: 2 s, the length of the victory jingle
 localparam T_STAR1 = 30, T_STAR2 = 60, T_STAR3 = 90;
 localparam T_SHAKE         = 10;
 localparam T_SPARKLE       = 10;

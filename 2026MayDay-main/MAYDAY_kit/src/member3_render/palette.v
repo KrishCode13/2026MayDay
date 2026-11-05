@@ -36,7 +36,7 @@ module palette (
             5'd3: begin               // Clouds
                 case (setting)
                     SET_NIGHT:  rgb565 = 16'h298A;
-                    SET_SUNSET: rgb565 = 16'hF518;
+                    SET_SUNSET: rgb565 = 16'hFF9B;   // REV3: pale cream clouds on the lighter sunset sky
                     default:    rgb565 = 16'hDEDB;
                 endcase
             end

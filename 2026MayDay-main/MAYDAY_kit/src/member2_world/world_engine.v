@@ -40,6 +40,8 @@ module world_engine (
     input  wire [23:0]        altitude,
     input  wire [1:0]         canopy_mode,
     input  wire [1:0]         deploy_grade,
+    input  wire               gust_warn,        // REV3: from Member 1 (level 1 takes turns with wind)
+    input  wire               gust_active,      // REV3
     // outputs to Member 3 (flattened: slot n in bits [8n+7:8n])
     output reg  [47:0]        obs_x,
     output reg  [47:0]        obs_y,
@@ -60,7 +62,13 @@ module world_engine (
     output reg                crate_collected,
     output reg  [2:0]         crates_level_total,
     output reg                magnet_active,
-    output reg  [8:0]         magnet_ticks_left
+    output reg  [8:0]         magnet_ticks_left,
+    // REV3 new outputs
+    output reg                gust_request,     // level 1: 1-cycle "start a gust now" to Member 1
+    output reg                pwarn_active,     // plane warning on a side edge (2 s)
+    output reg                pwarn_right,      // 0 = plane comes from the left, 1 = right
+    output reg  signed [7:0]  pwarn_y,          // screen row the plane will fly at
+    output wire               plane_busy        // REV4: plane warned or flying -> Member 1 holds the wind
 );
     `include "game_params.vh"
 
@@ -98,6 +106,13 @@ module world_engine (
     reg               slot_active [0:5];
     reg               slot_flip [0:5];
     reg [5:0] bird_wobble_phase [0:5];
+    reg       slot_straight [0:5];
+    reg       plane_flying;          // REV4: any active plane (registered copy for plane_busy)
+    assign plane_busy = pwarn_active | plane_flying;   // REV3: freefall birds fly straight up (no sideways drift)
+    reg [7:0] pwarn_timer;            // REV3: plane warning countdown
+    reg [2:0] pwarn_slot;             // REV3: slot reserved for the warned plane
+    reg [7:0] l1_gap;                 // REV3: level 1 pause between single items
+    reg [2:0] l1_done;                // REV3: level 1 round: [0] bird [1] crate [2] gust shown
 
     reg signed [15:0] cr_x [0:3];
     reg signed [15:0] cr_y [0:3];
@@ -106,6 +121,8 @@ module world_engine (
     reg [2:0]  cfg_max_obs;
     reg [15:0] cfg_spawn_interval;
     reg [7:0]  cfg_plane_share;
+    reg [15:0] cfg_plane_gap;      // REV3: ticks between planes (0 = no planes)
+    reg [15:0] plane_timer;
     reg [15:0] obstacle_spawn_timer;
     reg [15:0] crate_spawn_timer;
     reg [15:0] cfg_crate_interval;   // FIX #3: ticks between crates for this level
@@ -274,6 +291,13 @@ module world_engine (
         reg [1:0] empty_crate_idx;
         reg       window_bird_present;
         reg signed [15:0] rand_offset_x;
+        // REV3 spawner temporaries
+        reg plane_on, any_crate, world_clear, band_bot_used, band_bot_left, band_top_used, band_top_left;
+        reg bot_ok, spawning, in_ff, spawn_crate;
+        reg dbr_used, dbr_left, mb_left, mb_right, debris_ok;   // REV3 cross-direction safe side
+        reg [7:0] rand_any_x, rand_left_x, rand_rite_x, bot_x, top_x;
+        reg [2:0] l1_avail;  reg [1:0] l1_pick;  reg crate_alt_ok;
+        initial spawn_crate = 1'b0;
         // Manhattan proximity local calculation registers
         reg signed [7:0] target_center_x, crate_center_x;
         reg signed [7:0] target_center_y, crate_center_y;
@@ -296,6 +320,16 @@ module world_engine (
               warn_active          <= 1'b0;
               magnet_timer         <= 9'd0;
               magnet_active_reg    <= 1'b0;
+              gust_request         <= 1'b0;
+              pwarn_active         <= 1'b0;
+              pwarn_right          <= 1'b0;
+              pwarn_y              <= 8'sd40;
+              pwarn_timer          <= 8'd0;
+              plane_flying         <= 1'b0;
+              plane_timer          <= 16'd0;
+              pwarn_slot           <= 3'd0;
+              l1_gap               <= 8'd0;
+              l1_done              <= 3'd0;
               for (i = 0; i < 6; i = i + 1) begin
                  slot_x[i]            <= 16'sd0;
                  slot_y[i]            <= 16'sd0;
@@ -305,6 +339,7 @@ module world_engine (
                  slot_active[i]       <= 1'b0;
                  slot_flip[i]         <= 1'b0;
                  bird_wobble_phase[i] <= 6'd0;
+                 slot_straight[i]     <= 1'b0;
               end 
               for (i = 0; i < 4; i = i + 1) begin
                  cr_x[i]              <= 16'sd0;
@@ -313,36 +348,28 @@ module world_engine (
               end
               if (level_start) begin
                  target_x <= TARGET_X_MIN + ((seeded_val[7:0] ^ seeded_val[15:8]) % (TARGET_X_MAX - TARGET_X_MIN + 1)); // FIX #15 (mix both seed bytes)
+                 // REV3 difficulty table (easier; level 5 = old level 3 + planes)
+                 //        crates  max-on-screen  spawn-gap  plane-share  crate-gap
                  case (level)
-                 3'd1: begin
-                    crates_level_total <= 3'd3;  cfg_max_obs <= 3'd2;
-                    cfg_spawn_interval <= 16'd120; cfg_plane_share <= 8'd0;
-                    cfg_crate_interval <= 16'd600;
+                 3'd1: begin   // tutorial: one thing at a time (see L1 sequencer)
+                    crates_level_total <= 3'd3; cfg_max_obs <= 3'd1;
+                    cfg_spawn_interval <= 16'd0;   cfg_plane_share <= 8'd0;  cfg_crate_interval <= 16'd0;   cfg_plane_gap <= 16'd0;
                  end
                  3'd2: begin
-                    crates_level_total <= 3'd3;  cfg_max_obs <= 3'd3;
-                    cfg_spawn_interval <= 16'd96;  cfg_plane_share <= 8'd0;
-                    cfg_crate_interval <= 16'd600;
+                    crates_level_total <= 3'd3; cfg_max_obs <= 3'd2;
+                    cfg_spawn_interval <= 16'd120; cfg_plane_share <= 8'd0;  cfg_crate_interval <= 16'd450; cfg_plane_gap <= 16'd0;
                  end
-                 3'd3: begin
-                    crates_level_total <= 3'd4;  cfg_max_obs <= 3'd4;
-                    cfg_spawn_interval <= 16'd78;  cfg_plane_share <= 8'd26;
-                    cfg_crate_interval <= 16'd480;
+                 3'd3: begin   // + debris
+                    crates_level_total <= 3'd4; cfg_max_obs <= 3'd2;
+                    cfg_spawn_interval <= 16'd108; cfg_plane_share <= 8'd0;  cfg_crate_interval <= 16'd380; cfg_plane_gap <= 16'd0;
                  end
-                 3'd4: begin
-                   crates_level_total <= 3'd4;  cfg_max_obs <= 3'd5;
-                   cfg_spawn_interval <= 16'd66;  cfg_plane_share <= 8'd51;
-                   cfg_crate_interval <= 16'd480;
+                 3'd4: begin   // + planes (10%)
+                    crates_level_total <= 3'd4; cfg_max_obs <= 3'd3;
+                    cfg_spawn_interval <= 16'd108; cfg_plane_share <= 8'd26; cfg_crate_interval <= 16'd380; cfg_plane_gap <= 16'd720;  // plane every ~12 s
                  end
-                 3'd5: begin
-                    crates_level_total <= 3'd5;  cfg_max_obs <= 3'd6;
-                    cfg_spawn_interval <= 16'd54;  cfg_plane_share <= 8'd64;
-                    cfg_crate_interval <= 16'd400;
-                 end
-                 default: begin
-                    crates_level_total <= 3'd3;  cfg_max_obs <= 3'd2;
-                    cfg_spawn_interval <= 16'd120; cfg_plane_share <= 8'd0;
-                    cfg_crate_interval <= 16'd600;
+                 default: begin // level 5: everything, still beatable (planes 15%)
+                    crates_level_total <= 3'd5; cfg_max_obs <= 3'd3;
+                    cfg_spawn_interval <= 16'd96;  cfg_plane_share <= 8'd38; cfg_crate_interval <= 16'd300; cfg_plane_gap <= 16'd540;  // plane every ~9 s
                  end
                  endcase 
               end
@@ -397,84 +424,49 @@ module world_engine (
                        warning_timer <= warning_timer - 1;
                    end
                 end
-                active_obs_count = 3'd0;
-                window_bird_present = 1'b0;
+                gust_request <= 1'b0;
+                // =========================================================
+                // REV3 SPAWNER. Who is on screen, and which "bands" are taken.
+                // A band = the 24 px strip where new objects enter: bottom
+                // (birds) or top (debris). Objects in the same band reach the
+                // hero at about the same time, so the fairness rules use it.
+                // =========================================================
+                active_obs_count = 3'd0;  plane_on = 1'b0;  any_crate = 1'b0;
+                band_bot_used = 1'b0; band_bot_left = 1'b0; band_top_used = 1'b0; band_top_left = 1'b0;
+                dbr_used = 1'b0; dbr_left = 1'b0; mb_left = 1'b0; mb_right = 1'b0;
                 for (i = 0; i < 6; i = i + 1) begin
                    if (slot_active[i]) begin
                       active_obs_count = active_obs_count + 1;
-                      if (slot_type[i] == OBS_BIRD) window_bird_present = 1'b1;
+                      if (slot_type[i] == OBS_PLANE) plane_on = 1'b1;
+                      if ($signed(slot_y[i][15:8]) > (64 - BAND_GAP)) begin
+                         band_bot_used = 1'b1;  band_bot_left = ($signed(slot_x[i][15:8]) < 44);
+                      end
+                      if ($signed(slot_y[i][15:8]) < (BAND_GAP - 6)) begin
+                         band_top_used = 1'b1;  band_top_left = ($signed(slot_x[i][15:8]) < 44);
+                      end
+                      // debris still above / beside the hero (falls past him slowly)
+                      if (slot_type[i] == OBS_DEBRIS && $signed(slot_y[i][15:8]) < 40) begin
+                         dbr_used = 1'b1;  dbr_left = ($signed(slot_x[i][15:8]) < 44);
+                      end
+                      // birds still on their way up to the hero
+                      if (slot_type[i] == OBS_BIRD && $signed(slot_y[i][15:8]) >= 20) begin
+                         if ($signed(slot_x[i][15:8]) < 44) mb_left = 1'b1; else mb_right = 1'b1;
+                      end
                    end
                 end
+                for (i = 0; i < 4; i = i + 1) if (cr_active[i]) any_crate = 1'b1;
+                plane_flying <= plane_on;
+                crate_alt_ok = (altitude[23:8] >= CRATE_LAST_ALT);   // REV4
+                world_clear = (active_obs_count == 3'd0) && !any_crate && !warning_pending &&
+                              !pwarn_active && !gust_warn && !gust_active;
+
                 found_empty_slot = 1'b0;
                 empty_slot_idx   = 3'd0;
                 for (i = 0; i < 6; i = i + 1) begin
-                   if (!slot_active[i] && (!warning_pending || warning_target_slot != i[2:0]) && !found_empty_slot) begin
+                   if (!slot_active[i] && (!warning_pending || warning_target_slot != i[2:0]) &&
+                       (!pwarn_active || pwarn_slot != i[2:0]) && !found_empty_slot) begin
                       found_empty_slot = 1'b1;
                       empty_slot_idx   = i[2:0];
-                   end
-                end 
-                // Check spawner constraints alongside Checkpoint 3's Final Approach Hard Cutoff rule
-                if (game_state >= S_FREEFALL_LOCKED && game_state <= S_FINAL_APPROACH && scroll_vy > 0) begin
-                   obstacle_spawn_timer <= obstacle_spawn_timer + 1;
-                   if ((obstacle_spawn_timer >= cfg_spawn_interval) && (active_obs_count < cfg_max_obs) && found_empty_slot && !warning_pending) begin
-                      if ((game_state == S_FREEFALL_WINDOW) && window_bird_present) begin
-                         obstacle_spawn_timer <= cfg_spawn_interval;
-                      end else begin
-                         if (game_state == S_FREEFALL_LOCKED || game_state == S_FREEFALL_WINDOW) begin
-                            warning_pending                     <= 1'b1;
-                            warning_timer                       <= 8'd60;
-                            warning_target_slot                 <= empty_slot_idx;
-                            warn_active                         <= 1'b1;
-                            warn_edge                           <= 1'b0;
-                            warn_x                              <= 8'd10 + (lfsr_reg[7:0] % 76);
-                            slot_type[empty_slot_idx]           <= OBS_BIRD;
-                            slot_x[empty_slot_idx]              <= (8'd10 + (lfsr_reg[7:0] % 76)) <<< 8;
-                            slot_y[empty_slot_idx]              <= 16'sd64 <<< 8;
-                            slot_vx[empty_slot_idx]             <= BIRD_VX;
-                            slot_vy_ind[empty_slot_idx]         <= 16'sd0;
-                            slot_flip[empty_slot_idx]           <= lfsr_reg[8]; // FIX: was 16-bit blocking assign
-                            bird_wobble_phase[empty_slot_idx]   <= 6'd0;
-                         end else begin
-                            if (lfsr_reg[7:0] < cfg_plane_share) begin
-                               slot_active[empty_slot_idx]     <= 1'b1;
-                               slot_type[empty_slot_idx]       <= OBS_PLANE;
-                               slot_vy_ind[empty_slot_idx]     <= 16'sd0;
-                               obstacle_spawn_timer            <= 16'd0;
-                               if (lfsr_reg[9]) begin  // FIX: random side (was 'any bit set')
-                                  slot_x[empty_slot_idx]      <= -16'sd24 <<< 8;
-                                  slot_vx[empty_slot_idx]     <= PLANE_VX;
-                                  slot_flip[empty_slot_idx]   <= 1'b0;
-                               end else begin
-                                  slot_x[empty_slot_idx]      <= 16'sd96 <<< 8;
-                                  slot_vx[empty_slot_idx]     <= -PLANE_VX;
-                                  slot_flip[empty_slot_idx]   <= 1'b1;
-                               end
-                               slot_y[empty_slot_idx] <= (16'sd32 + (lfsr_reg[14:9] % 24)) <<< 8;
-                            end else if (lfsr_reg[15:14] == 2'b11 && level >= 3'd2) begin  // FIX #8: debris ~25% (was 12.5%)
-                               warning_pending                 <= 1'b1;
-                               warning_timer                   <= 8'd60;
-                               warning_target_slot             <= empty_slot_idx;
-                               warn_active                     <= 1'b1;
-                               warn_edge                       <= 1'b1;
-                               warn_x                          <= 8'd10 + (lfsr_reg[7:0] % 76);
-                               slot_type[empty_slot_idx]       <= OBS_DEBRIS;
-                               slot_x[empty_slot_idx]          <= (8'd10 + (lfsr_reg[7:0] % 76)) <<< 8;
-                               slot_y[empty_slot_idx]          <= -16'sd6 <<< 8;
-                               slot_vx[empty_slot_idx]         <= 16'sd0;
-                               slot_vy_ind[empty_slot_idx]     <= DEBRIS_VY;
-                            end else begin
-                               slot_active[empty_slot_idx]     <= 1'b1;
-                               slot_type[empty_slot_idx]       <= OBS_BIRD;
-                               slot_x[empty_slot_idx]          <= (8'd10 + (lfsr_reg[7:0] % 76)) <<< 8;
-                               slot_y[empty_slot_idx]          <= 16'sd64 <<< 8;
-                               slot_vx[empty_slot_idx]         <= BIRD_VX;
-                               slot_vy_ind[empty_slot_idx]     <= 16'sd0;
-                               slot_flip[empty_slot_idx]       <= lfsr_reg[8];
-                               bird_wobble_phase[empty_slot_idx] <= 6'd0;
-                               obstacle_spawn_timer            <= 16'd0;
-                            end
-                         end
-                      end
                    end
                 end
                 found_empty_crate = 1'b0;
@@ -484,28 +476,185 @@ module world_engine (
                       found_empty_crate = 1'b1;
                       empty_crate_idx   = i[1:0];
                    end
-                end 
-                if (game_state == S_CANOPY && scroll_vy > 0) begin
-                   crate_spawn_timer <= crate_spawn_timer + 1;
-                   // FIX #3: spread exactly crates_level_total crates over the ride
-                   // (was: endless crates every 210 ticks -> "all crates" star impossible).
-                   if ((crate_spawn_timer >= cfg_crate_interval) && found_empty_crate &&
-                       (crates_spawned < crates_level_total)) begin
-                      crate_spawn_timer <= 16'd0;
-                      crates_spawned    <= crates_spawned + 3'd1;
-                      cr_active[empty_crate_idx] <= 1'b1;
-                      cr_y[empty_crate_idx]      <= 16'sd64 <<< 8;
-                      // FIX #3: signed arithmetic so left-side spawns aren't read as huge unsigned
-                      rand_offset_x = $signed({10'd0, lfsr_reg[5:0]}) - 16'sd32;
-                      if (($signed(hero_x) + rand_offset_x) < $signed(CRATE_X_MIN)) begin
-                         cr_x[empty_crate_idx] <= CRATE_X_MIN <<< 8;
-                      end else if (($signed(hero_x) + rand_offset_x) > $signed(CRATE_X_MAX)) begin
-                         cr_x[empty_crate_idx] <= CRATE_X_MAX <<< 8;
+                end
+
+                // Random x anywhere, or forced onto one half ("safe side" rule, levels 3-5).
+                rand_any_x  = 8'd10 + (lfsr_reg[7:0] % 70);           // 10..79
+                rand_left_x = 8'd10 + (lfsr_reg[7:0] % 28);           // 10..37
+                rand_rite_x = 8'd50 + (lfsr_reg[7:0] % 28);           // 50..77
+                // Safe-side rule (levels 3-5), across BOTH directions: a new bird joins the
+                // side of any debris still near the hero; new debris joins the side of birds
+                // coming up (and waits if birds are coming up on both sides).
+                bot_x = (level >= 3'd3 && dbr_used)      ? (dbr_left      ? rand_left_x : rand_rite_x) :
+                        (level >= 3'd3 && band_bot_used) ? (band_bot_left ? rand_left_x : rand_rite_x) : rand_any_x;
+                top_x = (mb_left && !mb_right) ? rand_left_x :
+                        (mb_right && !mb_left) ? rand_rite_x :
+                        band_top_used ? (band_top_left ? rand_left_x : rand_rite_x) : rand_any_x;
+                debris_ok = !(mb_left && mb_right);
+                // Levels 1-2: never two birds in the same band (only one near the hero at a time).
+                bot_ok = (level >= 3'd3) || !band_bot_used;
+
+                // ---- plane warning countdown: spawn the plane when it ends ----
+                if (pwarn_active) begin
+                   if (pwarn_timer <= 8'd1) begin
+                      pwarn_active                <= 1'b0;
+                      slot_active[pwarn_slot]     <= 1'b1;
+                      slot_type[pwarn_slot]       <= OBS_PLANE;
+                      slot_vy_ind[pwarn_slot]     <= 16'sd0;
+                      slot_straight[pwarn_slot]   <= 1'b0;
+                      slot_y[pwarn_slot]          <= {pwarn_y, 8'd0};
+                      if (!pwarn_right) begin
+                         slot_x[pwarn_slot] <= -16'sd24 <<< 8;  slot_vx[pwarn_slot] <= PLANE_VX;  slot_flip[pwarn_slot] <= 1'b0;
                       end else begin
-                         cr_x[empty_crate_idx] <= ($signed(hero_x) + rand_offset_x) <<< 8;
+                         slot_x[pwarn_slot] <= 16'sd96 <<< 8;   slot_vx[pwarn_slot] <= -PLANE_VX; slot_flip[pwarn_slot] <= 1'b1;
+                      end
+                      obstacle_spawn_timer <= 16'd0;
+                   end else
+                      pwarn_timer <= pwarn_timer - 8'd1;
+                end
+
+                spawning = (game_state >= S_FREEFALL_LOCKED && game_state <= S_FINAL_APPROACH) && (scroll_vy > 0);
+                in_ff    = (game_state == S_FREEFALL_LOCKED || game_state == S_FREEFALL_WINDOW);
+
+                if (spawning && in_ff) begin
+                   // ---- FREEFALL: birds only, 1 s warning, fly STRAIGHT up.
+                   //      Levels 1-2: one at a time. Levels 3-5: up to 2.
+                   obstacle_spawn_timer <= obstacle_spawn_timer + 1;
+                   if ((obstacle_spawn_timer >= 16'd60) && found_empty_slot && !warning_pending && bot_ok &&
+                       (active_obs_count < ((level >= 3'd3) ? 3'd2 : 3'd1))) begin
+                      warning_pending                   <= 1'b1;
+                      warning_timer                     <= 8'd60;
+                      warning_target_slot               <= empty_slot_idx;
+                      warn_active                       <= 1'b1;
+                      warn_edge                         <= 1'b0;
+                      warn_x                            <= bot_x;
+                      slot_type[empty_slot_idx]         <= OBS_BIRD;
+                      slot_x[empty_slot_idx]            <= {bot_x, 8'd0};
+                      slot_y[empty_slot_idx]            <= 16'sd64 <<< 8;
+                      slot_vx[empty_slot_idx]           <= 16'sd0;
+                      slot_vy_ind[empty_slot_idx]       <= 16'sd0;
+                      slot_flip[empty_slot_idx]         <= lfsr_reg[8];
+                      slot_straight[empty_slot_idx]     <= 1'b1;   // REV3: straight up
+                      bird_wobble_phase[empty_slot_idx] <= 6'd0;
+                      obstacle_spawn_timer              <= 16'd0;
+                   end
+                end else if (spawning && level == 3'd1) begin
+                   // ---- LEVEL 1 TUTORIAL: exactly ONE thing at a time (bird, crate
+                   //      or gust), random order, each shown once per round.
+                   l1_gap <= world_clear ? ((l1_gap == 8'd255) ? l1_gap : l1_gap + 8'd1) : 8'd0;
+                   if (world_clear && (l1_gap >= L1_GAP_TICKS)) begin
+                      l1_gap <= 8'd0;
+                      l1_avail = ~l1_done & {1'b1, (crates_spawned < crates_level_total) && crate_alt_ok, 1'b1};
+                      if (l1_avail == 3'd0) l1_avail = {1'b1, (crates_spawned < crates_level_total) && crate_alt_ok, 1'b1};
+                      // REV4: running out of height with crates left -> give a crate next
+                      if ((crates_spawned < crates_level_total) && crate_alt_ok && (altitude[23:8] < 16'd450))
+                         l1_avail = 3'b010;
+                      // random start, then first available
+                      case (lfsr_reg[1:0] % 3)
+                         2'd0:    l1_pick = l1_avail[0] ? 2'd0 : l1_avail[1] ? 2'd1 : 2'd2;
+                         2'd1:    l1_pick = l1_avail[1] ? 2'd1 : l1_avail[2] ? 2'd2 : 2'd0;
+                         default: l1_pick = l1_avail[2] ? 2'd2 : l1_avail[0] ? 2'd0 : 2'd1;
+                      endcase
+                      // mark it shown; when bird, crate (if any left) and gust have all
+                      // been shown once, start a new round
+                      l1_done <= (((l1_done | (3'd1 << l1_pick)) |
+                                   {1'b0, !(crates_spawned < crates_level_total), 1'b0}) == 3'b111)
+                                 ? 3'd0 : (l1_done | (3'd1 << l1_pick));
+                      if (l1_pick == 2'd0 && found_empty_slot) begin          // one bird
+                         slot_active[empty_slot_idx]       <= 1'b1;
+                         slot_type[empty_slot_idx]         <= OBS_BIRD;
+                         slot_x[empty_slot_idx]            <= {rand_any_x, 8'd0};
+                         slot_y[empty_slot_idx]            <= 16'sd64 <<< 8;
+                         slot_vx[empty_slot_idx]           <= BIRD_VX;
+                         slot_vy_ind[empty_slot_idx]       <= 16'sd0;
+                         slot_flip[empty_slot_idx]         <= lfsr_reg[8];
+                         slot_straight[empty_slot_idx]     <= 1'b0;
+                         bird_wobble_phase[empty_slot_idx] <= 6'd0;
+                      end else if (l1_pick == 2'd1 && found_empty_crate) begin // one crate
+                         spawn_crate = 1'b1;
+                      end else begin                                          // one gust
+                         gust_request <= 1'b1;
+                      end
+                   end
+                end else if (spawning) begin
+                   // ---- LEVELS 2-5 canopy spawner ----
+                   obstacle_spawn_timer <= obstacle_spawn_timer + 1;
+                   // planes run on their own timer (levels 4-5); when due, wait until at
+                   // most 1 other obstacle is on screen, then give the 2 s side warning
+                   if (cfg_plane_gap != 16'd0 && !plane_on && !pwarn_active && plane_timer < cfg_plane_gap)
+                      plane_timer <= plane_timer + 1;
+                   if ((cfg_plane_gap != 16'd0) && (plane_timer >= cfg_plane_gap) && !plane_on && !pwarn_active &&
+                       found_empty_slot && !warning_pending && (active_obs_count <= 3'd1)) begin
+                      plane_timer  <= 16'd0;
+                      begin
+
+                         // PLANE: 2 s warning on the side edge first; nothing else spawns meanwhile
+                         pwarn_active <= 1'b1;
+                         pwarn_timer  <= PLANE_WARN_TICKS;
+                         pwarn_slot   <= empty_slot_idx;
+                         pwarn_right  <= lfsr_reg[9];
+                         pwarn_y      <= PLANE_Y;   // REV3: level with the hero's body; tug UP to clear it
+                      end
+                   // REV4: when a plane is due, hold back new obstacles so the screen
+                   // thins out and the plane always gets its turn (busy level 5 could
+                   // otherwise go a whole level without one)
+                   end else if ((obstacle_spawn_timer >= cfg_spawn_interval) && (active_obs_count < cfg_max_obs) &&
+                       found_empty_slot && !warning_pending && !pwarn_active && !plane_on &&
+                       !((cfg_plane_gap != 16'd0) && (plane_timer >= cfg_plane_gap))) begin
+                      if ((level >= 3'd3) && (lfsr_reg[15:14] == 2'b11) && debris_ok) begin
+                         // DEBRIS from the top: 1 s warning, safe-side rule
+                         warning_pending                 <= 1'b1;
+                         warning_timer                   <= 8'd60;
+                         warning_target_slot             <= empty_slot_idx;
+                         warn_active                     <= 1'b1;
+                         warn_edge                       <= 1'b1;
+                         warn_x                          <= top_x;
+                         slot_type[empty_slot_idx]       <= OBS_DEBRIS;
+                         slot_x[empty_slot_idx]          <= {top_x, 8'd0};
+                         slot_y[empty_slot_idx]          <= -16'sd6 <<< 8;
+                         slot_vx[empty_slot_idx]         <= 16'sd0;
+                         slot_vy_ind[empty_slot_idx]     <= DEBRIS_VY;
+                         slot_straight[empty_slot_idx]   <= 1'b1;
+                         obstacle_spawn_timer            <= 16'd0;
+                      end else if (bot_ok) begin
+                         // BIRD from the bottom (diagonal), safe-side rule
+                         slot_active[empty_slot_idx]       <= 1'b1;
+                         slot_type[empty_slot_idx]         <= OBS_BIRD;
+                         slot_x[empty_slot_idx]            <= {bot_x, 8'd0};
+                         slot_y[empty_slot_idx]            <= 16'sd64 <<< 8;
+                         slot_vx[empty_slot_idx]           <= BIRD_VX;
+                         slot_vy_ind[empty_slot_idx]       <= 16'sd0;
+                         slot_flip[empty_slot_idx]         <= (bot_x < 8'd44);   // drift toward own edge
+                         slot_straight[empty_slot_idx]     <= 1'b0;
+                         bird_wobble_phase[empty_slot_idx] <= 6'd0;
+                         obstacle_spawn_timer              <= 16'd0;
+                      end
+                   end
+                   // crates on their own timer (levels 2-5)
+                   if (game_state == S_CANOPY) begin
+                      crate_spawn_timer <= crate_spawn_timer + 1;
+                      if ((crate_spawn_timer >= cfg_crate_interval) && found_empty_crate &&
+                          (crates_spawned < crates_level_total) && crate_alt_ok) begin   // REV4: >= 150 m above ground
+                         crate_spawn_timer <= 16'd0;
+                         spawn_crate = 1'b1;
                       end
                    end
                 end
+
+                // ---- shared crate spawn (green medic crate) ----
+                if (spawn_crate) begin
+                   crates_spawned             <= crates_spawned + 3'd1;
+                   cr_active[empty_crate_idx] <= 1'b1;
+                   cr_y[empty_crate_idx]      <= 16'sd64 <<< 8;
+                   rand_offset_x = $signed({10'd0, lfsr_reg[5:0]}) - 16'sd32;
+                   if (($signed(hero_x) + rand_offset_x) < $signed(CRATE_X_MIN))
+                      cr_x[empty_crate_idx] <= CRATE_X_MIN <<< 8;
+                   else if (($signed(hero_x) + rand_offset_x) > $signed(CRATE_X_MAX))
+                      cr_x[empty_crate_idx] <= CRATE_X_MAX <<< 8;
+                   else
+                      cr_x[empty_crate_idx] <= ($signed(hero_x) + rand_offset_x) <<< 8;
+                end
+                spawn_crate = 1'b0;
                 // F. Global Kinematics Engine Transformations
                 for (i = 0; i < 6; i = i + 1) begin
                    if (slot_active[i]) begin
@@ -517,11 +666,16 @@ module world_engine (
                          case (slot_type[i])
                          OBS_BIRD: begin
                             bird_wobble_phase[i] <= (bird_wobble_phase[i] == 6'd11) ? 6'd0 : bird_wobble_phase[i] + 1;
-                            if (slot_flip[i]) begin
+                            if (slot_straight[i]) begin
+                               slot_x[i] <= slot_x[i];        // REV3: freefall birds fly straight up
+                            end else if (slot_flip[i]) begin
                                slot_x[i] <= slot_x[i] - BIRD_VX + (get_sine_wobble(bird_wobble_phase[i][3:0]) <<< 5);
                             end else begin
                                slot_x[i] <= slot_x[i] + BIRD_VX + (get_sine_wobble(bird_wobble_phase[i][3:0]) <<< 5);
                             end
+                         end
+                         OBS_PLANE: begin
+                            slot_y[i] <= slot_y[i];   // REV3: planes fly level (no scroll) at PLANE_Y
                          end
                          default: begin 
                             // Linear updates handled above

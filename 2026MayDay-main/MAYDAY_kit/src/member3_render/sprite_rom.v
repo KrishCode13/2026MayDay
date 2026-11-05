@@ -40,6 +40,8 @@ module sprite_rom (
                      POSE_CRUMPLED  = 3'd6,
                      POSE_BRAKE     = 3'd7;   // NEW (FIX #12)
 
+    localparam [4:0] MG = 5'd19;   // REV3: medic green (palette 19)
+
     // 1. HERO SPRITE ROM
     wire [3:0] h_col_eff = hero_mirror ? (4'd15 - hero_col) : hero_col;
     reg  [79:0] hero_row_bits;
@@ -313,9 +315,10 @@ module sprite_rom (
             4'd2: crate_row_bits = {GG,__,__,__,__,GG};
             4'd3: crate_row_bits = {__,GG,__,__,GG,__};
             4'd4: crate_row_bits = {KK,KK,KK,KK,KK,KK};
-            4'd5: crate_row_bits = {KK,BB,YY,BB,BB,KK};
-            4'd6: crate_row_bits = {KK,YY,YY,YY,YY,KK};
-            4'd7: crate_row_bits = {KK,BB,YY,BB,BB,KK};
+            // REV3: green medic crate with a white plus (heals a snapped line)
+            4'd5: crate_row_bits = {KK,MG,WW,WW,MG,KK};
+            4'd6: crate_row_bits = {KK,WW,WW,WW,WW,KK};
+            4'd7: crate_row_bits = {KK,MG,WW,WW,MG,KK};
             4'd8: crate_row_bits = {KK,KK,KK,KK,KK,KK};
             default: crate_row_bits = 30'd0;
         endcase
@@ -359,11 +362,17 @@ module sprite_rom (
                     default: icon_row_bits = 45'd0;
                 endcase
             end
-            3'd3: begin // Landing Arrow
+            3'd3: begin // REV5: big landing arrow (9x9, drawn at 2x = 18x18), gold with black outline
                 case (icon_row)
-                    4'd0: icon_row_bits = {YY,YY,YY,YY,YY, __,__,__,__};
-                    4'd1: icon_row_bits = {__,YY,YY,YY,__, __,__,__,__};
-                    4'd2: icon_row_bits = {__,__,YY,__,__, __,__,__,__};
+                    4'd0: icon_row_bits = {__,__,KK,KK,KK,KK,KK,__,__};
+                    4'd1: icon_row_bits = {__,__,KK,YY,YY,YY,KK,__,__};
+                    4'd2: icon_row_bits = {__,__,KK,YY,YY,YY,KK,__,__};
+                    4'd3: icon_row_bits = {KK,KK,KK,YY,YY,YY,KK,KK,KK};
+                    4'd4: icon_row_bits = {KK,YY,YY,YY,YY,YY,YY,YY,KK};
+                    4'd5: icon_row_bits = {__,KK,YY,YY,YY,YY,YY,KK,__};
+                    4'd6: icon_row_bits = {__,__,KK,YY,YY,YY,KK,__,__};
+                    4'd7: icon_row_bits = {__,__,__,KK,YY,KK,__,__,__};
+                    4'd8: icon_row_bits = {__,__,__,__,KK,__,__,__,__};
                     default: icon_row_bits = 45'd0;
                 endcase
             end
