@@ -423,7 +423,7 @@ module physics_engine (
                     gust_timer <= gust_timer - 9'd1;
                 // REV4: a plane is warned or flying -> stop any gust at once, so the
                 // wind never fights the player's tug-up over the plane
-                if (plane_busy && (gust_phase != 2'd0)) begin
+                if ((plane_busy || (altitude[23:8] < CALM_ALT)) && (gust_phase != 2'd0)) begin   // REV8: calm last 50 m
                     gust_phase  <= 2'd0;
                     gust_warn   <= 1'b0;
                     gust_active <= 1'b0;
@@ -435,7 +435,8 @@ module physics_engine (
                         gust_active <= 1'b0;
                         // REV3: level 1 (tutorial) gusts start only when world_engine
                         // requests one, so wind never overlaps a bird or crate.
-                        if (((level != 3'd1) ? (gust_timer == 9'd0) : gust_req_pend) && !plane_busy) begin   // REV4
+                        if (((level != 3'd1) ? (gust_timer == 9'd0) : gust_req_pend) && !plane_busy &&
+                            (altitude[23:8] >= CALM_ALT)) begin   // REV4 + REV8
                             gust_phase    <= 2'd1;
                             gust_timer    <= GUST_WARN_TICKS;
                             gust_warn     <= 1'b1;
@@ -499,8 +500,8 @@ module physics_engine (
                     flare_ok_n      = 1'b1;
                     landing_grade_n = 2'd1;             // hard (yellow)
                 end else begin
-                    flare_ok_n      = 1'b1;             // REV6: red press = very hard, wobbly landing
-                    landing_grade_n = 2'd2;             // (only NEVER pressing crashes)
+                    flare_ok_n      = 1'b0;             // REV8: red press = wobble, fall flat, death
+                    landing_grade_n = 2'd2;             // (renderer shows the wobble before lying down)
                 end
             end
             flare_ok      <= flare_ok_n;

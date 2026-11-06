@@ -1,5 +1,20 @@
 # MAYDAY changelog
 
+## Revision 8 (latest)
+
+| Item | Change | File |
+|---|---|---|
+| Wobbling landing looked unrealistic | Red press now kills: land, wobble for 1 s, fall flat, death tune, failed screen | physics_engine.v, render_engine.v |
+| Crate fell with the hero | During a crash crates fly up 3 px/tick and leave | world_engine.v |
+| Planes near the ground | None below 300 m | world_engine.v, game_params.vh |
+| Busy landing | No new obstacles below 120 m; last 50 m clear of obstacles, crates, warnings and wind | world_engine.v, physics_engine.v, game_params.vh |
+| Spots/crates at the edge | Landing spot x 20..60 (whole spot in 20..76); crate spawn x 20..70 | game_params.vh |
+
+**Verified in simulation (14 level-1 runs):** 0 planes below 300 m, 0 ticks with anything on screen in the last 50 m, landing spot always within x 21..58. The red-press death animation compiles but was not captured as an image.
+
+---
+
+
 ## Revision 7 (latest)
 
 | Item | Change | File |

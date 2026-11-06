@@ -295,6 +295,7 @@ module world_engine (
         reg plane_on, any_crate, world_clear, band_bot_used, band_bot_left, band_top_used, band_top_left;
         reg bot_ok, spawning, in_ff, spawn_crate;
         reg dbr_used, dbr_left, mb_left, mb_right, debris_ok;   // REV3 cross-direction safe side
+        reg calm_zone;   // REV8
         reg [7:0] rand_any_x, rand_left_x, rand_rite_x, bot_x, top_x;
         reg [2:0] l1_avail;  reg [1:0] l1_pick;  reg crate_alt_ok;
         initial spawn_crate = 1'b0;
@@ -430,6 +431,8 @@ module world_engine (
                    end
                 end
                 gust_request <= 1'b0;
+                calm_zone = (game_state == S_FINAL_APPROACH) && (altitude[23:8] < CALM_ALT);   // REV8
+                if (calm_zone) begin warn_active <= 1'b0; warning_pending <= 1'b0; end
                 // =========================================================
                 // REV3 SPAWNER. Who is on screen, and which "bands" are taken.
                 // A band = the 24 px strip where new objects enter: bottom
@@ -518,7 +521,8 @@ module world_engine (
                       pwarn_timer <= pwarn_timer - 8'd1;
                 end
 
-                spawning = (game_state >= S_FREEFALL_LOCKED && game_state <= S_FINAL_APPROACH) && (scroll_vy > 0);
+                spawning = (game_state >= S_FREEFALL_LOCKED && game_state <= S_FINAL_APPROACH) && (scroll_vy > 0) &&
+                           (altitude[23:8] >= OBS_LAST_ALT);   // REV8: nothing new below 120 m
                 in_ff    = (game_state == S_FREEFALL_LOCKED || game_state == S_FREEFALL_WINDOW);
 
                 if (spawning && in_ff) begin
@@ -589,6 +593,7 @@ module world_engine (
                    if (cfg_plane_gap != 16'd0 && !plane_on && !pwarn_active && plane_timer < cfg_plane_gap)
                       plane_timer <= plane_timer + 1;
                    if ((cfg_plane_gap != 16'd0) && (plane_timer >= cfg_plane_gap) && !plane_on && !pwarn_active &&
+                       (altitude[23:8] >= PLANE_LAST_ALT) &&   // REV8: no planes below 300 m
                        found_empty_slot && !warning_pending && (active_obs_count <= 3'd1)) begin
                       plane_timer  <= 16'd0;
                       begin
@@ -605,7 +610,7 @@ module world_engine (
                    // otherwise go a whole level without one)
                    end else if ((obstacle_spawn_timer >= cfg_spawn_interval) && (active_obs_count < cfg_max_obs) &&
                        found_empty_slot && !warning_pending && !pwarn_active && !plane_on &&
-                       !((cfg_plane_gap != 16'd0) && (plane_timer >= cfg_plane_gap))) begin
+                       !((cfg_plane_gap != 16'd0) && (plane_timer >= cfg_plane_gap) && (altitude[23:8] >= PLANE_LAST_ALT))) begin
                       if ((level >= 3'd3) && (lfsr_reg[15:14] == 2'b11) && debris_ok) begin
                          // DEBRIS from the top: 1 s warning, safe-side rule
                          warning_pending                 <= 1'b1;
@@ -663,7 +668,9 @@ module world_engine (
                 // F. Global Kinematics Engine Transformations
                 for (i = 0; i < 6; i = i + 1) begin
                    if (slot_active[i]) begin
-                      if (slot_hit[i] && (!warning_pending || warning_target_slot != i[2:0])) begin
+                      if (calm_zone) begin
+                         slot_active[i] <= 1'b0;                 // REV8: last 50 m is clear
+                      end else if (slot_hit[i] && (!warning_pending || warning_target_slot != i[2:0])) begin
                          slot_active[i] <= 1'b0;
                       end else begin
                          // REV7: during a crash everything flies up and away (no longer 'falls with him')
@@ -716,7 +723,7 @@ module world_engine (
                         // Apply attraction vectors based on distance thresholds
                         if (manhattan_dist > 32) begin
                            // Outside pull threshold, apply standard vertical scroll velocity
-                           cr_y[i] <= cr_y[i] + CRATE_FALL - scroll_vy;  // FIX #3: crates fall slower than hero (ICD: up by scroll_vy - CRATE_FALL)
+                           cr_y[i] <= cr_y[i] + CRATE_FALL - ((game_state == S_CRASH) ? 16'sd768 : scroll_vy);   // REV8: crates fly up during a crash  // FIX #3: crates fall slower than hero (ICD: up by scroll_vy - CRATE_FALL)
                         end else if (manhattan_dist >= 16) begin
                            // Medium Range Proximity Zone: pull smoothly at 0.25 px/tick
                            cr_x[i] <= (dx < 0) ? cr_x[i] - MAGNET_FAR : cr_x[i] + MAGNET_FAR;
@@ -731,7 +738,8 @@ module world_engine (
                         cr_y[i] <= cr_y[i] + CRATE_FALL - scroll_vy;  // FIX #3: crates fall slower than hero (ICD: up by scroll_vy - CRATE_FALL)
                      end
                      // Clear active registers if crates escape upper bounds
-                     if ($signed(cr_y[i][15:8]) < -16 || $signed(cr_y[i][15:8]) > 80) begin  // FIX #3: same unsigned bug
+                     if ($signed(cr_y[i][15:8]) < -16 || $signed(cr_y[i][15:8]) > 80 ||
+                          ((game_state == S_FINAL_APPROACH) && (altitude[23:8] < CALM_ALT))) begin  // FIX #3 + REV8 calm zone
                         cr_active[i] <= 1'b0;
                      end
                   end

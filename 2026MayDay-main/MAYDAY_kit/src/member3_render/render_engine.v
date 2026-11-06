@@ -348,11 +348,16 @@ module render_engine (
                                   (landing_grade == 2'd2) ? (state_timer[2] ? 9'sd3 : -9'sd3) : 9'sd2;
     // REV6: the canopy was never opened (crash in freefall) -> never draw a parachute
     wire no_chute = (canopy_mode == CM_FREEFALL);
+    // REV8: red-zone flare = death: he lands, wobbles left-right for 1 s, then falls flat
+    wire red_death  = is_crash_impact && (landing_grade == 2'd2);
+    wire [7:0] lie_start = red_death ? 8'd60 : 8'd15;
+    wire signed [8:0] death_wob = (red_death && state_timer < 8'd60) ?
+                                  (state_timer[2] ? 9'sd3 : -9'sd3) : 9'sd0;
 
-    wire signed [8:0] hx = $signed(hero_x) + crash_spin_dx + wobble_dx;
+    wire signed [8:0] hx = $signed(hero_x) + crash_spin_dx + wobble_dx + death_wob;
     wire signed [8:0] hy =
         (game_state == S_LANDING) ? (ground_y_reg[8:0] - 9'sd20) :
-        is_crash_impact           ? ((state_timer >= 8'd15) ? -9'sd64 : (ground_y_reg[8:0] - 9'sd18)) :   // REV5: hidden once lying
+        is_crash_impact           ? ((state_timer >= lie_start) ? -9'sd64 : (ground_y_reg[8:0] - 9'sd18)) :   // REV5/8: hidden once lying
         (plunge_down && no_chute) ? -9'sd64 :   // REV6: body drawn lying instead
         is_crash_short            ? (short_landed ? short_land_y[8:0] : short_fall_y[8:0]) :   // REV7
         is_crash_plunge           ? ((state_timer < 8'd90) ?
@@ -699,7 +704,7 @@ module render_engine (
     wire signed [9:0] lie_y0  = $signed(ground_y_reg[9:0]) - 10'sd4;
     wire signed [9:0] lie_col = $signed({3'd0, pixel_x}) - lie_x0;
     wire signed [9:0] lie_row = $signed({4'd0, pixel_y}) - lie_y0;
-    wire in_lie_box = ((is_crash_impact && (state_timer >= 8'd15)) ||
+    wire in_lie_box = ((is_crash_impact && (state_timer >= lie_start)) ||
                        (plunge_down && no_chute)) &&   // REV6/7
                       (lie_col >= 10'sd0) && (lie_col < 10'sd16) && (lie_row >= 10'sd0) && (lie_row < 10'sd4);
     reg  [4:0] lie_c;

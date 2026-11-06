@@ -52,7 +52,7 @@ localparam HB_DEBRIS_X = 1,  HB_DEBRIS_Y = 1,  HB_DEBRIS_W = 4,  HB_DEBRIS_H = 4
 localparam BIRD_W = 8, BIRD_H = 6, PLANE_W = 24, PLANE_H = 8, DEBRIS_W = 6, DEBRIS_H = 6;
 localparam CRATE_W = 6, CRATE_H = 9;
 localparam SPOT_W = 16;
-localparam TARGET_X_MIN = 8, TARGET_X_MAX = 72;
+localparam TARGET_X_MIN = 20, TARGET_X_MAX = 60;   // REV8: whole 16-px spot inside x 20..76 (was 8..72)
 localparam FLARE_LANE_X = 86;     // lane occupies x 86..91
 
 // ---------------- Physics (Member 1), Q8.8 -----------------------------
@@ -124,12 +124,15 @@ localparam WARN_TICKS        = 60;
 localparam PLANE_WARN_TICKS  = 120;  // 2 s side-edge warning before a plane
 localparam [15:0] CRATE_LAST_ALT = 16'd200;  // REV4: no crate spawns below this hero altitude -> every crate
                                             // starts >= 150 m above the ground (spawn row is 44 m below the hero)
-localparam PLANE_Y           = 24;   // planes fly level at the hero's body height: TUG UP (8 px) to pass over
+localparam PLANE_Y           = 24;
+localparam [15:0] PLANE_LAST_ALT = 16'd300;  // REV8: no new planes below 300 m
+localparam [15:0] OBS_LAST_ALT   = 16'd120;  // REV8: no new obstacles below 120 m (they clear the screen)
+localparam [15:0] CALM_ALT       = 16'd50;   // REV8: last 50 m: no obstacles, crates or wind at all   // planes fly level at the hero's body height: TUG UP (8 px) to pass over
 localparam BAND_GAP          = 24;   // px: obstacles closer than this vertically share a "band"
 localparam L1_GAP_TICKS      = 90;   // level 1 tutorial: pause between single items
 localparam TEXT_TICKS        = 180;  // guidance text stays 3 s
 localparam CRATE_SPAWN_RANGE = 32;   // spawn within +/-32 px of hero_x
-localparam CRATE_X_MIN = 8, CRATE_X_MAX = 82;
+localparam CRATE_X_MIN = 20, CRATE_X_MAX = 70;     // REV8: whole 6-px crate inside x 20..76 (was 8..82)
 localparam [15:0] LFSR_CONST_M2 = 16'h5A5A;
 // Difficulty table (per level 1..5) is implemented by Member 2 as a
 // case statement on `level`; values are in docs/ICD.md "Difficulty table".

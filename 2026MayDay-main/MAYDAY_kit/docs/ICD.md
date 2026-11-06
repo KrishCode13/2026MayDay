@@ -3,6 +3,13 @@
 Version: 25 Oct 2026 · Owner: Member 4 (integrator)
 
 
+> **Revision 8. Overrides earlier revisions where they conflict.**
+>
+> - **Red-zone flare = death:** he lands, wobbles left-right for 1 s, falls flat, death tune, LEVEL_FAILED ("HARD IMPACT"). Yellow = stumble (survive), green = clean.
+> - **Crates fly up and off the screen during a crash**, like the obstacles.
+> - **No planes below 300 m** (PLANE_LAST_ALT); **no new obstacles below 120 m** (OBS_LAST_ALT); **last 50 m completely calm**: no obstacles, crates, warnings or wind (CALM_ALT).
+> - **Safe x range:** landing spot `target_x` 20..60 (spot inside x 20..76); crates spawn at x 20..70.
+
 > **Revision 7. Overrides earlier revisions where they conflict.**
 >
 > - **Pause (SW0)** also silences and freezes the audio (`audio_engine.pause`).
