@@ -25,8 +25,8 @@ localparam [3:0] S_VICTORY         = 4'd11;
 // ---------------- Enumerations ----------------------------------------
 localparam [1:0] CM_FREEFALL = 2'd0, CM_OPEN = 2'd1, CM_BRAKING = 2'd2, CM_STALLED = 2'd3; // canopy_mode
 localparam [1:0] DG_NONE = 2'd0, DG_EARLY = 2'd1, DG_PERFECT = 2'd2, DG_LATE = 2'd3;      // deploy_grade
-localparam [1:0] CC_COLLAPSE = 2'd0, CC_EDGE = 2'd1, CC_MISSED_FLARE = 2'd2;               // crash_cause
-localparam [1:0] FR_TOO_LATE = 2'd0, FR_LINES_CUT = 2'd1, FR_TURBULENCE = 2'd2, FR_HARD_IMPACT = 2'd3; // fail_reason
+localparam [2:0] CC_COLLAPSE = 3'd0, CC_EDGE = 3'd1, CC_MISSED_FLARE = 3'd2, CC_KNOCKOUT = 3'd3; // crash_cause (REV6: 3 bits)
+localparam [2:0] FR_TOO_LATE = 3'd0, FR_LINES_CUT = 3'd1, FR_TURBULENCE = 3'd2, FR_HARD_IMPACT = 3'd3, FR_KNOCKED_OUT = 3'd4; // fail_reason (REV6: 3 bits)
 localparam [1:0] OBS_EMPTY = 2'd0, OBS_BIRD = 2'd1, OBS_PLANE = 2'd2, OBS_DEBRIS = 2'd3;   // obs_type
 
 // ---------------- Screen / geometry -----------------------------------
@@ -59,7 +59,19 @@ localparam FLARE_LANE_X = 86;     // lane occupies x 86..91
 localparam signed [15:0] V_FREEFALL   = 16'sd512;  // 2.0 px/tick
 localparam signed [15:0] GRAVITY      = 16'sd13;   // 0.05 px/tick^2
 localparam signed [15:0] V_CANOPY     = 16'sd77;   // 0.3  (REV3: was 0.5, slower = more time to dodge)
-localparam signed [15:0] V_DAMAGE     = 16'sd38;   // +0.15 per snapped line (REV3: was 0.25)
+localparam signed [15:0] V_DAMAGE     = 16'sd38;   // (unused since REV6, kept for reference)
+// REV6: damaged fall speed from the drag equation.  Drag = 1/2 * rho * v^2 * Cd * A,
+// so at terminal speed v = sqrt(2mg / (rho * Cd * A)), i.e. v ~ 1/sqrt(A).
+// One snapped line costs ~30% of the working canopy area: v1 = v0 / sqrt(0.7) = 1.195 * v0.
+localparam signed [15:0] V_CANOPY_DMG = 16'sd92;   // 0.36 px/tick = 1.195 x 0.3
+// REV6: bank. Holding L/R builds a bank angle (0..64 = 0..60 deg) at BANK_RATE per tick,
+// and it relaxes 2x faster when released. Sideways accel = STEER_ACC * bank / 32.
+// Load factor n = 1/cos(bank) raises the descent rate: v = v_level * n.
+localparam               BANK_RATE    = 1;     // ~1 s to a full 60 deg hard bank
+localparam               BANK_HARD    = 40;    // >= this = "hard bank" (about 38 deg)
+localparam               BANK_SLIGHT  = 12;    // >= this = "slight bank"
+// REV6: freefall hit = stun (tumble, no steering); 2 stuns before deploying = knocked out
+localparam               STUN_TICKS   = 60;
 localparam signed [15:0] V_STALL      = 16'sd384;  // 1.5
 localparam signed [15:0] STEER_ACC    = 16'sd10;   // 0.04 (half in freefall) (REV3: beats a strength-2 gust)
 localparam               DRAG_SHIFT   = 4;         // vx = vx - (vx >>> 4)
@@ -93,7 +105,7 @@ localparam [15:0] ALT_FINAL        = 16'd150;
 localparam [15:0] FLARE_SOFT_HI    = 16'd18;
 localparam [15:0] FLARE_SOFT_LO    = 16'd4;
 localparam [15:0] FLARE_HARD_HI    = 16'd28;   // hard window: 28..18 and 4..1
-localparam [15:0] FLARE_HARD_LO    = 16'd1;
+localparam [15:0] FLARE_HARD_LO    = 16'd1;   // REV6: any other press (red) = very hard landing, still survived
 // FIX #2: slow motion near the ground. Below SLOWMO_ALT in FINAL_APPROACH,
 // only 1 of every SLOWMO_DIV game ticks is passed on (game runs at 1/3 speed).
 localparam [15:0] SLOWMO_ALT       = 16'd30;

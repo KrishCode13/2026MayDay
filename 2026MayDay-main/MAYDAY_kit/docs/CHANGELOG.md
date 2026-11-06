@@ -1,5 +1,46 @@
 # MAYDAY changelog
 
+## Revision 7 (latest)
+
+| Item | Change | File |
+|---|---|---|
+| Pause | SW0 also silences and freezes the audio | audio_engine.v, My_Top_Module.v |
+| Bank sprite detached | Pendulum tilt: canopy fixed, rows sheared progressively (<= 1 px per row) so the body stays attached; body swings outward | render_engine.v |
+| Bank too strong | Push = half steering on banking + a little more as the bank deepens (max = old normal steering, was 2x) | physics_engine.v |
+| Explosion sound missing | Restored | audio_engine.v |
+| Silent before the explosion | Soft steady wind while the plane flies (scene_wind) | audio_engine.v, cutscene_engine.v |
+| Wall hit just before landing | Below 60 m: short tumble straight down to the ground, then lying (no long plunge) | render_engine.v |
+| Chirp too long | Chirps for 1 s after each new bird only | audio_engine.v, My_Top_Module.v |
+| Bird fell with the hero | During CRASH obstacles fly up 3 px/tick and leave | world_engine.v |
+| Skip hint hard to read | "PRESS C TO SKIP", top centre, black (white on night levels) | cutscene_engine.v |
+
+**Verified in simulation:** tilt frames (level, slight right, hard right, hard left) stay connected; audio: explosion, 1 s chirp then silence, pause silences and resumes, music unaffected; full design compiles with no warnings.
+
+---
+
+
+## Revision 6 (latest)
+
+| Item | Change | Owner / file |
+|---|---|---|
+| Drift right after one press | Drag `vx - (vx >>> 4)` rounded small positive speeds to 0, so they never decayed; drag now removes at least 1 unit, symmetrically | physics_engine.v (Caleb) |
+| Wrong line snaps | Hit side compared an UNSIGNED slice and used +8 for every obstacle; now signed, with real centres (bird +4, plane +12, debris +3) | world_engine.v (Arun) |
+| Tug with one line showed 2 lines | Braking sprite only when undamaged; damaged sprite kept; tug rise halved and pull toward the damaged side | render_engine.v (Ruben), physics_engine.v (Caleb) |
+| Crash showed a parachute | No parachute if never deployed: tumble, then lying flat; deployed crashes keep the crumpled canopy | render_engine.v (Ruben) |
+| Bank + load factor | Bank angle built by holding L/R; sideways accel from the bank; descent x 1/cos(bank) (lookup table); lean sprites (1 px / 2 px) | physics_engine.v (Caleb), render_engine.v (Ruben) |
+| Canopy/body swing | Gust drives a spring-damper body offset; renderer shifts body rows under the canopy | physics_engine.v (Caleb), render_engine.v (Ruben) |
+| Surface area | Damaged fall speed from v ~ 1/sqrt(A): 1.195 x canopy speed | game_params.vh |
+| Flare grades | Red = very hard wobbly landing (survive), yellow = stumble, green = clean; never pressing = crash | physics_engine.v (Caleb), render_engine.v (Ruben), game_director.v (Sathya) |
+| Freefall hits | Stun (1 s tumble, "STUNNED!"); 2nd stun = KNOCKED OUT | physics_engine.v (Caleb), render_engine.v (Ruben) |
+| PRESS C timing | Shown for the whole deploy window | render_engine.v (Ruben) |
+| Cutscene | Every level (HOME and NEXT), silent, "C: SKIP" hint; per-level pages (L1 tutorial, L3 debris, L4 planes); skip rules; RETRY straight to freefall | cutscene_engine.v, game_director.v (Sathya) |
+| Sound | Event-driven: plane drone > wind whoosh > bird chirps > silence | audio_engine.v, My_Top_Module.v (Sathya) |
+
+**Verified in simulation:** drift returns to exactly 0; bank reaches slight (30) and hard (64) and doubles the fall speed at 60 deg; first freefall hit stuns without snapping lines, second knocks out (cause 3); a red press freezes the marker and gives landing grade 2; level 1 skip -> pages; level 2 skip -> the jump; Retry -> FREEFALL_LOCKED with a fresh level; audio modes: cutscene and falling silent, bird chirp when a bird appears, death tune on crash. The new sprites (lean, swing, stun tumble, lying without a parachute, debris/plane slides) compile cleanly but were not captured as images this round.
+
+---
+
+
 ## Revision 5 (latest)
 
 | Item | Change | Owner / file |

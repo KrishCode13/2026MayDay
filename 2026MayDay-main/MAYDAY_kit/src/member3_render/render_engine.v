@@ -30,7 +30,7 @@ module render_engine (
     input  wire [9:0]         best_stars,
     input  wire [3:0]         total_stars,
     input  wire [2:0]         crates_got,
-    input  wire [1:0]         fail_reason,
+    input  wire [2:0]         fail_reason,     // REV6: 3 bits (4 = knocked out)
     // from Member 1
     input  wire signed [7:0]  hero_x,
     input  wire signed [7:0]  hero_y,
@@ -43,7 +43,7 @@ module render_engine (
     input  wire               gust_active,
     input  wire               gust_dir,
     input  wire [1:0]         gust_strength,
-    input  wire               landing_grade,
+    input  wire [1:0]         landing_grade,   // REV6: 0 soft, 1 hard, 2 very hard (red)
     // from Member 2
     input  wire [47:0]        obs_x,
     input  wire [47:0]        obs_y,
@@ -66,6 +66,10 @@ module render_engine (
     input  wire               pwarn_right,
     input  wire signed [7:0]  pwarn_y,
     input  wire               flare_locked,   // REV5: C pressed -> freeze the flare-lane marker
+    input  wire [1:0]         bank_lvl,       // REV6: 0 level, 1 slight, 2 hard bank
+    input  wire               bank_left,      // REV6
+    input  wire signed [2:0]  swing_dx,       // REV6: body offset under the canopy
+    input  wire               stunned,        // REV6: hit in freefall -> tumbling
     // output
     output reg  [15:0]        oled_data_game     // RGB565
 );
@@ -80,6 +84,14 @@ module render_engine (
     // Crash sub-modes driven by fail_reason
     wire is_crash_plunge = (game_state == S_CRASH) && (fail_reason != FR_HARD_IMPACT);
     wire is_crash_impact = (game_state == S_CRASH) && (fail_reason == FR_HARD_IMPACT);
+    // REV7: crash with the ground already close (e.g. hitting the wall just before
+    // landing): no long plunge - he tumbles straight down from where he was and lies there
+    wire is_crash_short  = is_crash_plunge && (alt_metres < 16'd60);
+    wire signed [9:0] short_fall_y = $signed({hero_y[7], hero_y[7], hero_y}) + $signed({2'd0, state_timer});
+    wire signed [9:0] short_land_y = $signed(ground_y_reg[9:0]) - 10'sd18;
+    wire short_landed = is_crash_short && (short_fall_y >= short_land_y);
+    wire plunge_air  = is_crash_plunge && (is_crash_short ? !short_landed : (state_timer < 8'd90));
+    wire plunge_down = is_crash_plunge && !plunge_air;
 
     // -----------------------------------------------------------------
     // Animation Timers, Parallax Accumulators & 18-bit Ground Y
@@ -103,14 +115,14 @@ module render_engine (
                                 18'sd44;
 
     wire signed [17:0] ground_y_next =
-        is_crash_plunge               ? plunge_ground_y :
+        (is_crash_plunge && !is_crash_short) ? plunge_ground_y :   // REV7: short fall keeps the real ground
         (is_crash_impact || game_state == S_LANDING) ? 18'sd54 :
         ($signed(hero_y) + 18'sd20 + $signed({2'b00, alt_metres}));
 
     // Effective vertical scroll speed (6.0 px/tick = 16'sd1536 in Q8.8 during crash plunge)
     wire signed [15:0] eff_scroll_vy =
-        (is_crash_plunge && state_timer < 8'd90) ? 16'sd1536 :
-        (game_state == S_LANDING || is_crash_impact) ? 16'sd0 :
+        (plunge_air && !is_crash_short) ? 16'sd1536 :
+        (game_state == S_LANDING || is_crash_impact || is_crash_short) ? 16'sd0 :
         scroll_vy;
 
     wire obs_anim_frame = anim_tick_cnt[3]; // Switches every 8 game_ticks (bird/debris)
@@ -133,7 +145,9 @@ module render_engine (
     reg       gust_warn_d = 1'b0, warn_d = 1'b0, pwarn_d = 1'b0;
     reg [3:0] state_d = 4'd0;
     reg [1:0] lines_d = 2'd0;
-    reg       intro_done = 1'b0;              // levels 2-5: new-element message shown once
+    reg       intro_done = 1'b0;
+    reg       stun_d = 1'b0;
+    always @(posedge clk) stun_d <= stunned;              // levels 2-5: new-element message shown once
     integer   m;
     reg       new_bird;
     always @* begin
@@ -153,7 +167,9 @@ module render_engine (
             if (crate_collected)                     pop_timer <= 5'd30;
             else if (game_tick && pop_timer != 5'd0) pop_timer <= pop_timer - 5'd1;
 
-            if ((lines_d == 2'd1) && (lines_snapped == 2'd0) && is_gameplay) begin
+            if (stunned && !stun_d) begin
+                msg_id <= 4'd10; msg_timer <= 8'd90;                         // REV6: STUNNED!
+            end else if ((lines_d == 2'd1) && (lines_snapped == 2'd0) && is_gameplay) begin
                 msg_id <= 4'd9;  msg_timer <= 8'd120;                         // REPAIRED!
             end else if (level == 3'd1) begin
                 if (new_bird)                          begin msg_id <= 4'd1; msg_timer <= TEXT_TICKS; end
@@ -324,13 +340,21 @@ module render_engine (
     end
 
     // Effective hero frame position during gameplay, S_LANDING, and S_CRASH
-    wire hard_stumble_on = (game_state == S_LANDING) && landing_grade &&
-                           (state_timer >= 8'd10 && state_timer < 8'd45);
+    // REV6: wobble by landing grade - yellow (1) stumbles, red (2) wobbles hard and longer
+    wire hard_stumble_on = (game_state == S_LANDING) && (landing_grade != 2'd0) &&
+                           (state_timer >= 8'd10) &&
+                           (state_timer < ((landing_grade == 2'd2) ? 8'd90 : 8'd45));
+    wire signed [8:0] wobble_dx = !hard_stumble_on ? 9'sd0 :
+                                  (landing_grade == 2'd2) ? (state_timer[2] ? 9'sd3 : -9'sd3) : 9'sd2;
+    // REV6: the canopy was never opened (crash in freefall) -> never draw a parachute
+    wire no_chute = (canopy_mode == CM_FREEFALL);
 
-    wire signed [8:0] hx = $signed(hero_x) + crash_spin_dx + (hard_stumble_on ? 9'sd2 : 9'sd0);
+    wire signed [8:0] hx = $signed(hero_x) + crash_spin_dx + wobble_dx;
     wire signed [8:0] hy =
         (game_state == S_LANDING) ? (ground_y_reg[8:0] - 9'sd20) :
         is_crash_impact           ? ((state_timer >= 8'd15) ? -9'sd64 : (ground_y_reg[8:0] - 9'sd18)) :   // REV5: hidden once lying
+        (plunge_down && no_chute) ? -9'sd64 :   // REV6: body drawn lying instead
+        is_crash_short            ? (short_landed ? short_land_y[8:0] : short_fall_y[8:0]) :   // REV7
         is_crash_plunge           ? ((state_timer < 8'd90) ?
                                      (9'sd10 + $signed({3'b000, state_timer[6:2]})) :
                                      (ground_y_reg[8:0] - 9'sd18)) :
@@ -345,9 +369,9 @@ module render_engine (
         hero_vflip_sel  = 1'b0;
 
         if (game_state == S_CRASH) begin
-            if (is_crash_plunge && state_timer < 8'd90) begin
+            if (plunge_air) begin
                 // Tumbling plunge: alternate freefall & crumpled, flipping H and V
-                hero_pose_sel   = (fail_reason == FR_TOO_LATE) ? POSE_FREEFALL :
+                hero_pose_sel   = no_chute ? POSE_FREEFALL :   // REV6: no parachute if never deployed
                                   (state_timer[3] ? POSE_CRUMPLED : POSE_FREEFALL);
                 hero_mirror_sel = state_timer[2];
                 hero_vflip_sel  = state_timer[3];
@@ -358,7 +382,11 @@ module render_engine (
             end
         end else if (game_state == S_LANDING) begin
             hero_pose_sel   = (state_timer < 8'd30) ? POSE_FULL : POSE_CRUMPLED;
-            hero_mirror_sel = hard_stumble_on;
+            hero_mirror_sel = hard_stumble_on && ((landing_grade == 2'd2) ? state_timer[3] : 1'b1);
+        end else if (stunned) begin                   // REV6: tumbling after a freefall hit
+            hero_pose_sel   = POSE_FREEFALL;
+            hero_mirror_sel = anim_tick_cnt[2];
+            hero_vflip_sel  = anim_tick_cnt[3];
         end else if (game_state == S_FREEFALL_LOCKED || game_state == S_FREEFALL_WINDOW ||
                      canopy_mode == CM_FREEFALL) begin
             hero_pose_sel = POSE_FREEFALL;
@@ -368,7 +396,7 @@ module render_engine (
             hero_pose_sel = POSE_OPEN_1;
         end else if (game_state == S_CANOPY && state_timer < 8'd40) begin
             hero_pose_sel = POSE_OPEN_2;
-        end else if (canopy_mode == CM_BRAKING) begin
+        end else if ((canopy_mode == CM_BRAKING) && (lines_snapped == 2'd0)) begin   // REV6: one line gone keeps the damaged sprite
             hero_pose_sel = POSE_BRAKE;      // FIX #12: dedicated braking sprite
         end else if (lines_snapped == 2'd1) begin
             hero_pose_sel   = dmg_flap_frame ? POSE_DMG_FLAP2 : POSE_DMG_FLAP1;
@@ -537,9 +565,15 @@ module render_engine (
     end
 
     // --- Layer 7: Hero (16x20 frame, with tumble vflip & landing canopy settle) ---
+    // REV6: canopy rows lean toward the bank (1 px slight, 2 px hard); body rows
+    // swing under the canopy after a gust (swing_dx). Box widened by 3 px each side.
     wire in_hero_box = is_gameplay &&
-                       (px >= hx) && (px < hx + HERO_FRAME_W) &&
+                       (px >= hx - 9'sd8) && (px < hx + HERO_FRAME_W + 9'sd8) &&   // REV7: room for the tilt
                        (py >= hy) && (py < hy + HERO_FRAME_H);
+    wire        flying_canopy = (game_state == S_CANOPY || game_state == S_FINAL_APPROACH) &&
+                                (canopy_mode != CM_FREEFALL);
+    wire signed [3:0] lean_mag = (bank_lvl == 2'd2) ? 4'sd2 : (bank_lvl == 2'd1) ? 4'sd1 : 4'sd0;
+    wire signed [3:0] lean_px  = !flying_canopy ? 4'sd0 : (bank_left ? -lean_mag : lean_mag);
     wire [4:0] raw_hero_row = in_hero_box ? (py - hy) : 5'd0;
 
     // During S_LANDING, rows 0..11 (canopy) settle down behind the hero and vanish at tick 48
@@ -547,8 +581,20 @@ module render_engine (
                               ((raw_hero_row < 5'd12) &&
                                ((state_timer >= 8'd48) || (raw_hero_row < landing_canopy_drop)));
 
-    wire s1_in_hero = in_hero_box && !canopy_settled_out;
-    wire [3:0] s1_hero_col = s1_in_hero ? (px - hx) : 4'd0;
+    // REV7: pendulum TILT. The canopy stays put (pivot), every row below is shifted a
+    // little more than the one above (at most 1 px between rows), so the lines, the
+    // hands and the body always stay connected. Banking right swings the body left
+    // (outward); a gust adds the swing_dx offset at the feet.
+    // lean_px is already signed by the bank direction (+ right, - left)
+    wire signed [5:0] feet_off = (!flying_canopy) ? 6'sd0 :
+                                 -({{2{lean_px[3]}}, lean_px} <<< 1) + {{3{swing_dx[2]}}, swing_dx};
+    wire signed [10:0] shear     = feet_off * $signed({6'd0, raw_hero_row});
+    wire signed [10:0] shear_px  = shear >>> 4;           // row 19 -> about feet_off
+    wire signed [3:0]  row_shift = (shear_px > 11'sd7) ? 4'sd7 : (shear_px < -11'sd7) ? -4'sd7 : shear_px[3:0];
+    wire signed [8:0] hero_col_s = px - hx - {{5{row_shift[3]}}, row_shift};
+    wire s1_in_hero = in_hero_box && !canopy_settled_out &&
+                      (hero_col_s >= 9'sd0) && (hero_col_s < 9'sd16);
+    wire [3:0] s1_hero_col = s1_in_hero ? hero_col_s[3:0] : 4'd0;
     wire [4:0] s1_hero_row = s1_in_hero ?
         (hero_vflip_sel ? (5'd19 - raw_hero_row) :
          ((game_state == S_LANDING && raw_hero_row < 5'd12) ?
@@ -633,7 +679,7 @@ module render_engine (
           (px == body_cx - (dust_r >> 1)) || (px == body_cx + (dust_r >> 1))));
     wire fx_dust_on =
         ((game_state == S_LANDING) && landing_grade && (state_timer >= 8'd4 && state_timer < 8'd44) && in_dust_puff) ||
-        (((is_crash_plunge && state_timer >= 8'd90) || is_crash_impact) && in_dust_puff);
+        ((plunge_down || is_crash_impact) && in_dust_puff);
 
     // REV5: hero lying flat after a crash landing (16x5), crumpled canopy beside him
     function [4:0] lie_px; input [2:0] r; input [3:0] c;
@@ -653,7 +699,8 @@ module render_engine (
     wire signed [9:0] lie_y0  = $signed(ground_y_reg[9:0]) - 10'sd4;
     wire signed [9:0] lie_col = $signed({3'd0, pixel_x}) - lie_x0;
     wire signed [9:0] lie_row = $signed({4'd0, pixel_y}) - lie_y0;
-    wire in_lie_box = is_crash_impact && (state_timer >= 8'd15) &&
+    wire in_lie_box = ((is_crash_impact && (state_timer >= 8'd15)) ||
+                       (plunge_down && no_chute)) &&   // REV6/7
                       (lie_col >= 10'sd0) && (lie_col < 10'sd16) && (lie_row >= 10'sd0) && (lie_row < 10'sd4);
     reg  [4:0] lie_c;
     reg       s1_in_fx;
@@ -661,6 +708,7 @@ module render_engine (
     always @* begin
         s1_in_fx    = 1'b0;
         lie_c       = lie_px(lie_row[2:0], lie_col[3:0]);
+        if (no_chute && (lie_c == 5'd5 || lie_c == 5'd6)) lie_c = 5'd0;   // REV6: no canopy beside him
         s1_fx_color = 5'd0;
         if (in_lie_box && lie_c != 5'd0) begin   // REV5: hero lying on the ground ("sleeping")
             s1_in_fx    = 1'b1;
@@ -954,6 +1002,7 @@ module render_engine (
             4'd6:    begin msg_str = "DEBRIS ABOVE!";    msg_len = 5'd13; end
             4'd7:    begin msg_str = "PLANES! TUG UP";   msg_len = 5'd14; end
             4'd8:    begin msg_str = "FINAL DESCENT";    msg_len = 5'd13; end
+            4'd10:   begin msg_str = "STUNNED!";         msg_len = 5'd8;  end   // REV6
             default: begin msg_str = "REPAIRED!";        msg_len = 5'd9;  end
         endcase
         msg_x0 = (7'd97 - (msg_len * 7'd6)) >> 1;
@@ -965,8 +1014,8 @@ module render_engine (
     wire [4:0] hud_hi_col  = light_bg ? 5'd7 : 5'd10;   // navy on light skies, gold at night
 
     // FIX #14 / #5: when to show the "PRESS C" prompt
-    wire press_c_on = ((game_state == S_FREEFALL_WINDOW) &&
-                       (alt_metres <= ALT_PERFECT_HI) && (alt_metres >= ALT_PERFECT_LO)) ||
+    // REV6: shown for the WHOLE deploy window, from the moment the lock disappears
+    wire press_c_on = (game_state == S_FREEFALL_WINDOW) ||
                       ((game_state == S_FINAL_APPROACH) &&
                        (alt_metres <= FLARE_SOFT_HI) && (alt_metres >= FLARE_SOFT_LO));
 
@@ -1494,6 +1543,15 @@ module render_engine (
                                 4'd7: s1_text_char = "N";
                                 4'd8: s1_text_char = "C";
                                 4'd9: s1_text_char = "E";
+                                default: s1_in_text = 1'b0;
+                            endcase
+                        end
+                        3'd4: begin // REV6 FR_KNOCKED_OUT: "KNOCKED OUT"
+                            case (char_idx)
+                                4'd0: s1_text_char = "K"; 4'd1: s1_text_char = "N"; 4'd2: s1_text_char = "O";
+                                4'd3: s1_text_char = "C"; 4'd4: s1_text_char = "K"; 4'd5: s1_text_char = "E";
+                                4'd6: s1_text_char = "D"; 4'd7: s1_text_char = " "; 4'd8: s1_text_char = "O";
+                                4'd9: s1_text_char = "U"; 4'd10: s1_text_char = "T";
                                 default: s1_in_text = 1'b0;
                             endcase
                         end

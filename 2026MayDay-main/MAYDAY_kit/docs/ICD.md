@@ -3,6 +3,29 @@
 Version: 25 Oct 2026 · Owner: Member 4 (integrator)
 
 
+> **Revision 7. Overrides earlier revisions where they conflict.**
+>
+> - **Pause (SW0)** also silences and freezes the audio (`audio_engine.pause`).
+> - **Bank:** gentler push (half the old steering on banking, up to the old normal at a full bank). The sprite TILTS like a pendulum: the canopy stays put, each lower row shifts a little more, so lines, hands and body stay connected; banking right swings the body left; gust swing adds at the feet.
+> - **Cutscene sound:** soft wind while the plane flies (`cutscene_engine.scene_wind`), explosion sound restored; the pages are silent.
+> - **Skip hint:** "PRESS C TO SKIP", top centre, black (white on the night levels).
+> - **Bird chirp:** 1 s after each NEW bird (`bird_new` pulse), not the whole time it is on screen.
+> - **Crash near the ground** (altitude < 60 m): no long plunge; he tumbles straight down from where he was and lies on the ground.
+> - **During a crash**, obstacles fly up and off the screen instead of moving with the hero.
+
+> **Revision 6. Overrides earlier revisions where they conflict.** Details in `docs/CHANGELOG.md`.
+>
+> - **Bank:** holding L/R under canopy builds a bank angle (0-60 deg in ~1 s); sideways accel = STEER_ACC x bank/32; descent x load factor n = 1/cos(bank) (2x at 60 deg). New physics outputs `bank_lvl[1:0]`, `bank_left`.
+> - **Swing:** gusts push the canopy and the body lags then swings back (spring-damper); `swing_dx[2:0]` (-3..3 px) shifts the body rows under the canopy.
+> - **Surface area:** one snapped line -> V_CANOPY_DMG = 1.195 x V_CANOPY (v ~ 1/sqrt(A), ~30% area lost).
+> - **One line gone:** canopy steers itself to the damaged side (4x stronger while tugging); tug rise halved; damaged sprite kept while tugging.
+> - **Flare:** any C press survives: green soft, yellow hard (stumble), red very hard (strong wobble). Never pressing = crash. `landing_grade` is 2 bits.
+> - **Freefall hits:** stun (1 s tumble, no steering, "STUNNED!"); a second stun = knocked out (`crash_cause` 3 / `fail_reason` 4 "KNOCKED OUT"). `crash_cause` and `fail_reason` are 3 bits; `stunned` output.
+> - **Crash pictures:** never-deployed crashes show no parachute (tumble, then lying flat); deployed crashes show the crumpled canopy.
+> - **Cutscene:** plays at every level start from HOME and from NEXT, in that level's palette, silent, with a "C: SKIP" hint. Pages: level 1 controls + mission + birds/crates/land slides; level 3 DEBRIS slide; level 4 PLANES slide; levels 2 and 5 none. C during the animation: levels 1/3/4 -> pages, levels 2/5 -> the jump; C on a page -> start. RETRY goes straight to FREEFALL_LOCKED.
+> - **Sound:** gameplay is event-driven, plane > wind > bird > silence; plain falling and the cutscene are silent. `audio_engine` inputs `plane_on`, `wind_on`, `bird_on`.
+> - **Fixes:** symmetric drag (no more rightward creep); hit side uses signed compare and real obstacle centres; "PRESS C" for the whole deploy window.
+
 > **Revision 5. Overrides earlier revisions where they conflict.** Details in `docs/CHANGELOG.md`.
 >
 > - **Keyboard removed.** Board buttons only: BTNL/BTNR steer, BTNU tug, BTNC deploy/land/confirm. No PS/2 pins or ports.

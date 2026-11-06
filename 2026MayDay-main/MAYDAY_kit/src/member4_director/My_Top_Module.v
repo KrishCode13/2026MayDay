@@ -71,15 +71,18 @@ module My_Top_Module (
     wire [2:0] level;      wire level_start;
     wire [7:0]  state_timer;  wire [15:0] seed;      wire [2:0] menu_cursor;
     wire [2:0]  stars_earned; wire [9:0] best_stars; wire [3:0] total_stars;
-    wire [2:0]  crates_got;   wire [1:0] fail_reason;
+    wire [2:0]  crates_got;   wire [2:0] fail_reason;   // REV6: 3 bits
     wire        cutscene_done;
 
     // Member 1 outputs
     wire signed [7:0]  hero_x, hero_y;
     wire signed [15:0] scroll_vy;
-    wire [1:0]  canopy_mode, lines_snapped, gust_strength, deploy_grade, crash_cause;
+    wire [1:0]  canopy_mode, lines_snapped, gust_strength, deploy_grade;
+    wire [2:0]  crash_cause;                  // REV6: 3 bits
+    wire [1:0]  landing_grade;                // REV6: 0 soft, 1 hard, 2 very hard
+    wire [1:0]  bank_lvl;  wire bank_left;  wire signed [2:0] swing_dx;  wire stunned;   // REV6
     wire        damaged_side, gust_warn, gust_active, gust_dir;
-    wire        hero_crash, hero_landed, landing_grade, landed_on_spot;
+    wire        hero_crash, hero_landed, landed_on_spot;
 
     // Member 2 outputs
     wire [47:0] obs_x, obs_y;  wire [11:0] obs_type;  wire [5:0] obs_active, obs_flip;
@@ -90,6 +93,7 @@ module My_Top_Module (
     wire        plane_busy;   // REV4
     wire        explode;      // REV4: cutscene -> audio
     wire        flare_locked; // REV5: physics -> renderer (C pressed in final approach)
+    wire        scene_wind;   // REV7: cutscene -> audio
     wire        gust_request, pwarn_active, pwarn_right;  wire signed [7:0] pwarn_y;   // REV3
     wire [1:0]  strike_lines;  wire [2:0] crates_level_total;  wire [8:0] magnet_ticks_left;
 
@@ -114,6 +118,7 @@ module My_Top_Module (
         .crate_collected(crate_collected), .gust_request(gust_request),   // REV3
         .plane_busy(plane_busy),   // REV4: no wind while a plane is coming
         .flare_locked(flare_locked),   // REV5: freeze the flare-lane marker
+        .bank_lvl(bank_lvl), .bank_left(bank_left), .swing_dx(swing_dx), .stunned(stunned),   // REV6
         .strike(strike), .strike_side(strike_side), .strike_lines(strike_lines), .target_x(target_x),
         .hero_x(hero_x), .hero_y(hero_y), .scroll_vy(scroll_vy), .altitude(altitude),
         .canopy_mode(canopy_mode), .lines_snapped(lines_snapped), .damaged_side(damaged_side),
@@ -155,16 +160,28 @@ module My_Top_Module (
         .magnet_active(magnet_active),
         .pwarn_active(pwarn_active), .pwarn_right(pwarn_right), .pwarn_y(pwarn_y),   // REV3
         .flare_locked(flare_locked),   // REV5
+        .bank_lvl(bank_lvl), .bank_left(bank_left), .swing_dx(swing_dx), .stunned(stunned),   // REV6
         .oled_data_game(oled_data_game));
 
     // ---------------- Member 4: cutscene + displays -----------------
     cutscene_engine u_cut (
         .clk(clk), .rst(rst), .game_tick(game_tick), .game_state(game_state), .level(level),
         .pixel_x(pixel_x), .pixel_y(pixel_y), .oled_data_cut(oled_data_cut), .cutscene_done(cutscene_done),
+        .center_press(center_press),   // REV6: C skips
+        .scene_wind(scene_wind),       // REV7
         .explode(explode));
 
     // REV4: sound on the Pmod AMP2 (JXADC top row: 1 = AIN, 2 = GAIN, 3 = n/c, 4 = SHUTDOWN)
+    // REV6: event sounds. A bird is on screen if any active obstacle slot is a bird.
+    // REV7: pulse when a NEW bird appears (a slot turns active holding a bird)
+    wire [5:0] bird_slots = {obs_type[11:10] == OBS_BIRD, obs_type[9:8] == OBS_BIRD, obs_type[7:6] == OBS_BIRD,
+                             obs_type[5:4]   == OBS_BIRD, obs_type[3:2] == OBS_BIRD, obs_type[1:0] == OBS_BIRD};
+    reg  [5:0] obs_active_d = 6'd0;
+    always @(posedge clk) obs_active_d <= obs_active;
+    wire bird_new = |(obs_active & ~obs_active_d & bird_slots);
     audio_engine u_audio (.clk(clk), .rst(rst), .game_state(game_state), .explode(explode), .mute(mute),
+        .plane_on(plane_busy), .wind_on(gust_active), .bird_new(bird_new),
+        .scene_wind(scene_wind), .pause(pause),   // REV7
         .fail_reason(fail_reason),
         .amp_ain(JXADC[0]), .amp_gain(JXADC[1]), .amp_shutdown_n(JXADC[3]));
     assign JXADC[2] = 1'b0;

@@ -28,6 +28,10 @@ module physics_engine (
     input  wire               gust_request,     // REV3: level 1 gusts only when world_engine asks
     input  wire               plane_busy,       // REV4: plane warned or flying -> no wind (so tugging up works)
     output wire               flare_locked,     // REV5: C was pressed in FINAL_APPROACH (marker freezes)
+    output wire [1:0]         bank_lvl,         // REV6: 0 level, 1 slight bank, 2 hard bank
+    output wire               bank_left,        // REV6: bank direction (1 = banking left)
+    output wire signed [2:0]  swing_dx,         // REV6: body offset under the canopy (-3..3 px)
+    output wire               stunned,          // REV6: stunned by a hit in freefall
     // from Member 2
     input  wire               strike,
     input  wire               strike_side,
@@ -47,9 +51,9 @@ module physics_engine (
     output reg  [1:0]         gust_strength,
     output reg  [1:0]         deploy_grade,
     output reg                hero_crash,
-    output reg  [1:0]         crash_cause,
+    output reg  [2:0]         crash_cause,      // REV6: 3 bits (3 = knocked out in freefall)
     output reg                hero_landed,
-    output reg                landing_grade,
+    output reg  [1:0]         landing_grade,    // REV6: 0 soft (green), 1 hard (yellow), 2 very hard (red)
     output reg                landed_on_spot
 );
     `include "game_params.vh"
@@ -76,7 +80,7 @@ module physics_engine (
     assign flare_locked = flare_done;   // REV5
     reg               flare_ok;     // that edge was soft or hard (not a miss)
     reg               flare_ok_n;
-    reg               landing_grade_n;
+    reg  [1:0]        landing_grade_n;
     reg               touch_sent;   // land / miss-flare pulse already fired
     reg               flare_req;    // FIX #5: BTNC press latched until the next game_tick
     reg signed [15:0] y_next;       // FIX #11: next screen Y (Q8.8)
@@ -145,11 +149,40 @@ module physics_engine (
                        && brake_held && !stalling;   // NEW: brake is BTNU (was BTNL+BTNR)
 
     wire signed [15:0] steer_acc = in_freefall ? (STEER_ACC >>> 1) : STEER_ACC;
+    wire signed [15:0] brake_rise_now = (lines_snapped == 2'd1) ? (BRAKE_RISE >>> 1) : BRAKE_RISE;
 
-    wire signed [15:0] canopy_vy =
-        (lines_snapped == 2'd0) ? V_CANOPY :
-        (lines_snapped == 2'd1) ? (V_CANOPY + V_DAMAGE) :
-                                  (V_CANOPY + (V_DAMAGE <<< 1));
+    // ================= REV6: bank, load factor, swing, stun =================
+    reg  signed [7:0]  bank = 8'sd0;        // -64..64 = -60..60 deg (negative = left)
+    wire        [6:0]  bank_abs = bank[7] ? -bank : bank;
+    assign bank_lvl  = (bank_abs >= BANK_HARD) ? 2'd2 : (bank_abs >= BANK_SLIGHT) ? 2'd1 : 2'd0;
+    assign bank_left = bank[7];
+    // load factor n = 1/cos(bank), Q8.8, 9 steps of 7.5 deg
+    function [9:0] load_factor; input [3:0] k;
+        case (k)
+            4'd0: load_factor = 10'd256;  4'd1: load_factor = 10'd258;  4'd2: load_factor = 10'd265;
+            4'd3: load_factor = 10'd277;  4'd4: load_factor = 10'd296;  4'd5: load_factor = 10'd323;
+            4'd6: load_factor = 10'd362;  4'd7: load_factor = 10'd420;  default: load_factor = 10'd512;
+        endcase
+    endfunction
+    wire        [9:0]  lf = load_factor(bank_abs[6:3]);
+    // sideways acceleration from the bank (bank 32 = old steering, 64 = double)
+    // REV7: gentler - half the old push the moment you bank, plus a little more as the
+    // bank deepens (max = the old normal steering, was 2x)
+    wire signed [15:0] bank_acc = (bank == 8'sd0) ? 16'sd0 :
+        ((bank[7] ? -(STEER_ACC >>> 1) : (STEER_ACC >>> 1)) + (($signed(bank) * STEER_ACC) >>> 7));
+    // pendulum: body lags the canopy when a gust hits, then springs back
+    reg  signed [15:0] sw_x = 16'sd0, sw_v = 16'sd0;
+    assign swing_dx = (sw_x > 16'sd767) ? 3'sd3 : (sw_x < -16'sd767) ? -3'sd3 : sw_x[10:8];
+    reg  [6:0] stun_t = 7'd0;
+    reg  [1:0] ff_hits = 2'd0;
+    reg        ko_sent = 1'b0;
+    assign stunned = (stun_t != 7'd0);
+
+    // REV6: level-flight speed from canopy area (1 line gone -> 1.195x), times the
+    // load factor of the current bank (a hard bank sinks faster)
+    wire signed [15:0] level_vy  = (lines_snapped == 2'd0) ? V_CANOPY : V_CANOPY_DMG;
+    wire signed [25:0] banked_vy = level_vy * $signed({1'b0, lf});
+    wire signed [15:0] canopy_vy = banked_vy[23:8];
 
     // 1/60 ≈ 17/1024 so opening blend needs no divider.
     wire signed [31:0] open_num =
@@ -254,7 +287,13 @@ module physics_engine (
             // ----- horizontal speed -----
             // Steer one side only. Both held is brake (CP2) / flare (CP3).
             // L/R now only steer; braking is on BTNU, so steering works while braking.
-            if (steer_left_held && !steer_right_held)
+            // REV6: under canopy the sideways push comes from the BANK angle (built up
+            // by holding L/R); in freefall it is a direct push; stunned = no control
+            if (stunned)
+                vx_n = vx;
+            else if (!in_freefall)
+                vx_n = vx + bank_acc;
+            else if (steer_left_held && !steer_right_held)
                 vx_n = vx - steer_acc;
             else if (steer_right_held && !steer_left_held)
                 vx_n = vx + steer_acc;
@@ -268,14 +307,20 @@ module physics_engine (
                     vx_n = vx_n + gust_acc;
             end
 
-            if (lines_snapped == 2'd1) begin    // item 11 drift
+            if (lines_snapped == 2'd1) begin    // item 11: canopy steers itself to the damaged side
+                // (stronger while tugging with one line: the uneven wing yaws that way)
                 if (damaged_side == 1'b0)
-                    vx_n = vx_n - DRIFT_ACC;
+                    vx_n = vx_n - (braking ? (DRIFT_ACC <<< 2) : DRIFT_ACC);
                 else
-                    vx_n = vx_n + DRIFT_ACC;
+                    vx_n = vx_n + (braking ? (DRIFT_ACC <<< 2) : DRIFT_ACC);
             end
 
-            vx_n = vx_n - (vx_n >>> DRAG_SHIFT);
+            // REV6 FIX (drift right): ">>> 4" rounds small POSITIVE speeds to 0, so they
+            // never decayed. Drag now removes at least 1 unit, symmetrically, to 0.
+            if (vx_n > 16'sd0)
+                vx_n = vx_n - (((vx_n >>> DRAG_SHIFT) == 16'sd0) ? 16'sd1 : (vx_n >>> DRAG_SHIFT));
+            else if (vx_n < 16'sd0)
+                vx_n = vx_n + ((((-vx_n) >>> DRAG_SHIFT) == 16'sd0) ? 16'sd1 : ((-vx_n) >>> DRAG_SHIFT));
 
             x_q_n    = x_q + vx_n;
             hero_x_n = x_q_n[15:8];
@@ -318,7 +363,8 @@ module physics_engine (
             gust_strength <= 2'd0;
             deploy_grade  <= DG_NONE;
             crash_cause   <= CC_COLLAPSE;
-            landing_grade <= 1'b0;
+            landing_grade <= 2'd0;
+            bank <= 8'sd0; sw_x <= 16'sd0; sw_v <= 16'sd0; stun_t <= 7'd0; ff_hits <= 2'd0; ko_sent <= 1'b0;
             landed_on_spot<= 1'b0;
             lfsr          <= ((seed ^ LFSR_CONST_M1) == 16'd0)
                            ? 16'd1 : (seed ^ LFSR_CONST_M1);
@@ -341,7 +387,7 @@ module physics_engine (
             // ----- items 5 + 11: lines/side (same-tick strike + late deploy) -----
             lines_n = lines_snapped;
             side_n  = damaged_side;
-            if (in_flight && strike_pend) begin          // was: strike (never seen)
+            if (in_flight && strike_pend && !in_freefall) begin   // REV6: freefall hits stun instead
                 if (lines_n == 2'd0)
                     side_n = strike_side_l;
                 if (lines_n + strike_lines_l >= 2'd2)
@@ -445,15 +491,17 @@ module physics_engine (
                 if ((altitude[23:8] <= FLARE_SOFT_HI) &&
                     (altitude[23:8] >= FLARE_SOFT_LO)) begin
                     flare_ok_n      = 1'b1;
-                    landing_grade_n = 1'b0;             // soft 15-5 m
+                    landing_grade_n = 2'd0;             // soft (green)
                 end else if (((altitude[23:8] <= FLARE_HARD_HI) &&
                               (altitude[23:8] >  FLARE_SOFT_HI)) ||
                              ((altitude[23:8] <  FLARE_SOFT_LO) &&
                               (altitude[23:8] >= FLARE_HARD_LO))) begin
                     flare_ok_n      = 1'b1;
-                    landing_grade_n = 1'b1;             // hard 25-15 or 5-1 m
+                    landing_grade_n = 2'd1;             // hard (yellow)
+                end else begin
+                    flare_ok_n      = 1'b1;             // REV6: red press = very hard, wobbly landing
+                    landing_grade_n = 2'd2;             // (only NEVER pressing crashes)
                 end
-                // else miss: flare_ok_n stays 0
             end
             flare_ok      <= flare_ok_n;
             landing_grade <= landing_grade_n;
@@ -481,7 +529,8 @@ module physics_engine (
             if (cam_lock && in_flight)
                 y_next = y_q + vy_n;
             else if (braking)
-                y_next = (y_q > (y_min_q + BRAKE_RISE)) ? (y_q - BRAKE_RISE) : y_min_q;
+                // REV6: with one line gone the uneven wing lifts only half as much
+                y_next = (y_q > (y_min_q + brake_rise_now)) ? (y_q - brake_rise_now) : y_min_q;
             else if (in_flight)
                 y_next = (y_q < (y_rest_q - BRAKE_RETURN)) ? (y_q + BRAKE_RETURN) : y_rest_q;
             y_q <= y_next;
@@ -528,6 +577,30 @@ module physics_engine (
                 scroll_vy <= 16'sd0;
 
             // crashes / landing: collapse, then touchdown, then edge
+            // REV6: bank, swing and stun state
+            if (game_state == S_CANOPY || game_state == S_FINAL_APPROACH) begin
+                if (steer_left_held && !steer_right_held && !stunned)
+                    bank <= (bank <= -8'sd64 + BANK_RATE) ? -8'sd64 : bank - BANK_RATE;
+                else if (steer_right_held && !steer_left_held && !stunned)
+                    bank <= (bank >= 8'sd64 - BANK_RATE) ? 8'sd64 : bank + BANK_RATE;
+                else if (bank > 8'sd1)  bank <= bank - 8'sd2;
+                else if (bank < -8'sd1) bank <= bank + 8'sd2;
+                else                    bank <= 8'sd0;
+            end else bank <= 8'sd0;
+            sw_v <= sw_v + (gust_active ? (gust_dir ? -(gust_acc <<< 4) : (gust_acc <<< 4)) : 16'sd0)
+                         - (sw_x >>> 4) - (sw_v >>> 3);
+            sw_x <= sw_x + sw_v;
+            if (stun_t != 7'd0) stun_t <= stun_t - 7'd1;
+            if (in_freefall && strike_pend) begin
+                stun_t  <= STUN_TICKS;
+                ff_hits <= (ff_hits == 2'd3) ? ff_hits : ff_hits + 2'd1;
+                if ((ff_hits >= 2'd1) && !ko_sent) begin       // second stun = knocked out
+                    hero_crash  <= 1'b1;
+                    crash_cause <= CC_KNOCKOUT;
+                    ko_sent     <= 1'b1;
+                end
+            end
+
             if (in_flight && (lines_n >= 2'd2) && !collapse_sent) begin
                 hero_crash    <= 1'b1;
                 crash_cause   <= CC_COLLAPSE;

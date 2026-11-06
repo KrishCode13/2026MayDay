@@ -407,7 +407,12 @@ module world_engine (
                  end
                 if (hit_count > 0) begin
                    strike <= 1'b1;
-                   strike_side <= ((slot_x[first_hit_idx][15:8] + 8) < (hero_x + 8)) ? 1'b0 : 1'b1;
+                   // REV6 FIX: signed compare (slot_x[..][15:8] alone is UNSIGNED) and the
+                   // real centre of each obstacle (bird 8 px -> +4, plane 24 -> +12, debris 6 -> +3)
+                   strike_side <= (($signed(slot_x[first_hit_idx][15:8]) +
+                                    ((slot_type[first_hit_idx] == OBS_PLANE)  ? 10'sd12 :
+                                     (slot_type[first_hit_idx] == OBS_DEBRIS) ? 10'sd3  : 10'sd4))
+                                   < ($signed(hero_x) + 10'sd8)) ? 1'b0 : 1'b1;
                    if (hit_count == 3'd1) begin
                       strike_lines <= (slot_type[first_hit_idx] == OBS_PLANE) ? 2'd2 : 2'd1;
                    end else begin
@@ -661,7 +666,8 @@ module world_engine (
                       if (slot_hit[i] && (!warning_pending || warning_target_slot != i[2:0])) begin
                          slot_active[i] <= 1'b0;
                       end else begin
-                         slot_y[i] <= slot_y[i] + slot_vy_ind[i] - scroll_vy;
+                         // REV7: during a crash everything flies up and away (no longer 'falls with him')
+                         slot_y[i] <= slot_y[i] + slot_vy_ind[i] - ((game_state == S_CRASH) ? 16'sd768 : scroll_vy);
                          slot_x[i] <= slot_x[i] + slot_vx[i];
                          case (slot_type[i])
                          OBS_BIRD: begin

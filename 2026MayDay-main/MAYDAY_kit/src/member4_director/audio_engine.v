@@ -23,8 +23,13 @@ module audio_engine (
     input  wire       clk,            // 100 MHz
     input  wire       rst,
     input  wire [3:0] game_state,
-    input  wire [1:0] fail_reason,    // (reserved: all crashes use the death tune)
-    input  wire       explode,        // 1-cycle pulse from cutscene_engine
+    input  wire [2:0] fail_reason,    // (reserved: all crashes use the death tune)
+    input  wire       explode,        // 1-cycle pulse from cutscene_engine (explosion)
+    input  wire       scene_wind,     // REV7: cutscene plane is flying -> soft wind
+    input  wire       pause,          // REV7: SW0 pause -> silence and freeze the music
+    input  wire       plane_on,       // REV6: plane warned or flying  -> engine drone
+    input  wire       wind_on,        // REV6: a gust is blowing       -> wind
+    input  wire       bird_new,       // REV7: 1-cycle pulse when a NEW bird appears -> 1 s of chirps
     input  wire       mute,           // SW1
     output reg        amp_ain = 1'b0, // Pmod AMP2 pin 1: audio in
     output wire       amp_gain,       // Pmod AMP2 pin 2: 1 = 6 dB, 0 = 12 dB
@@ -308,15 +313,25 @@ module audio_engine (
     endfunction
 
     // ---------------- which sound ----------------
-    localparam M_MUSIC = 3'd0, M_SOFT = 3'd1, M_LOUD = 3'd2, M_VICTORY = 3'd3, M_DEATH = 3'd4;
+    // REV6 sound map: gameplay is EVENT-driven - plane > wind > bird > silence.
+    // The cutscene and plain falling are silent.
+    localparam M_MUSIC = 3'd0, M_SOFT = 3'd1, M_LOUD = 3'd2, M_VICTORY = 3'd3, M_DEATH = 3'd4,
+               M_SILENT = 3'd5, M_PLANE = 3'd6, M_BIRD = 3'd7;
+    // REV7: chirp only for 1 s after each new bird (not the whole time it is on screen)
+    reg [14:0] bird_t = 15'd0;
+    reg        bird_new_l = 1'b0;
+    always @(posedge clk) if (bird_new) bird_new_l <= 1'b1; else if (sample_en) bird_new_l <= 1'b0;
+    wire       bird_on = (bird_t != 15'd0);
+    wire in_play = (game_state >= S_FREEFALL_LOCKED) && (game_state <= S_FINAL_APPROACH);
     reg [2:0] mode;
     always @* begin
-        case (game_state)
-            S_CUTSCENE, S_CANOPY, S_FINAL_APPROACH: mode = M_SOFT;
-            S_FREEFALL_LOCKED, S_FREEFALL_WINDOW:   mode = M_LOUD;
-            S_CRASH:                                mode = M_DEATH;
-            S_LANDING:                              mode = M_VICTORY;
-            default:                                mode = M_MUSIC;
+        if (in_play)
+            mode = plane_on ? M_PLANE : wind_on ? M_LOUD : bird_on ? M_BIRD : M_SILENT;
+        else case (game_state)
+            S_CUTSCENE: mode = M_SOFT;     // REV7: soft wind while the plane flies + explosion
+            S_CRASH:    mode = M_DEATH;
+            S_LANDING:  mode = M_VICTORY;
+            default:    mode = M_MUSIC;
         endcase
     end
     reg [2:0] mode_d = 3'd0;
@@ -356,6 +371,18 @@ module audio_engine (
     wire signed [23:0] wind_w = w2 * $signed({4'd0, gust});
     wire signed [23:0] boom_w = boom_lp * $signed({2'd0, boom_env});
 
+    // REV6: bird chirps - two quick falling "tweets" every ~0.55 s
+    reg [13:0] chirp_t = 14'd0;                 // samples since the chirp pattern began
+    reg [23:0] chirp_inc = 24'd0, ph_chirp = 24'd0;
+    wire       chirp_on = (chirp_t < 14'd1200) || (chirp_t >= 14'd2400 && chirp_t < 14'd3600);
+    wire signed [11:0] chirp_sq = chirp_on ? (ph_chirp[23] ? 12'sd30 : -12'sd30) : 12'sd0;
+    // REV6: plane engine - 85 Hz + 170 Hz buzz with a 12 Hz propeller throb and some rumble
+    reg [23:0] ph_e1 = 24'd0, ph_e2 = 24'd0;
+    reg [11:0] prop = 12'd0;                    // propeller throb counter (~12 Hz)
+    wire [5:0] prop_amp = prop[11] ? ~prop[10:5] : prop[10:5];   // triangle 0..63
+    wire signed [11:0] eng_raw = (ph_e1[23] ? 12'sd28 : -12'sd28) + (ph_e2[23] ? 12'sd14 : -12'sd14)
+                                 + (noise >>> 3);
+    wire signed [23:0] eng_w = eng_raw * $signed({6'd0, 6'd40 + prop_amp[5:2]});
     reg signed [11:0] mix = 12'sd0;
     wire signed [11:0] mel_sq  = (mel_note  == 7'd0) ? 12'sd0 : (ph_mel[23]  ? $signed({6'd0, env}) : -$signed({6'd0, env}));
     wire signed [11:0] bass_sq = (bass_note == 7'd0) ? 12'sd0 : (ph_bass[23] ? 12'sd34 : -12'sd34);
@@ -367,8 +394,10 @@ module audio_engine (
         if (rst) begin
             step <= 6'd0; step_cnt <= 13'd0; ph_mel <= 24'd0; ph_bass <= 24'd0;
             boom_env <= 10'd0; mix <= 12'sd0; mode_d <= M_MUSIC;
-        end else if (sample_en) begin
+        end else if (sample_en && !pause) begin            // REV7: everything freezes while paused
             mode_d <= mode;
+            if (bird_new_l)            bird_t <= 15'd24414;     // 1 s
+            else if (bird_t != 15'd0)  bird_t <= bird_t - 15'd1;
             if (mode != mode_d) begin                       // new sound: start from the top
                 step <= 6'd0; step_cnt <= 13'd0; env <= 6'd63;
             end else if (step_cnt >= step_len - 1) begin
@@ -407,34 +436,45 @@ module audio_engine (
             w1   <= w1 + step1;
             w2   <= w2 + (d2 >>> 2);
             gdiv <= gdiv + 9'd1;
-            if (gdiv == 9'd255) begin                                          // ~10 ms: slow swells
-                gdiv <= 9'd0;
-                if (gust_up) begin
-                    if (gust >= gust_peak) gust_up <= 1'b0; else gust <= gust + 8'd2;
-                end else begin
-                    if (gust <= ((mode == M_LOUD) ? 8'd70 : 8'd45)) begin
-                        gust_up   <= 1'b1;
-                        gust_peak <= 8'd150 + {1'b0, lfsr[13:7]} % 8'd100;   // next gust 150..249
-                    end else gust <= gust - 8'd1;
+            if (gdiv[6:0] == 7'd0) begin                                   // ~5 ms steps
+                // REV6: the whoosh swells in when a gust starts and fades when it ends
+                if (mode == M_LOUD) begin if (gust < 8'd230) gust <= gust + 8'd3; end
+                else if (mode == M_SOFT && scene_wind) begin   // REV7: gentle steady cabin wind
+                    if (gust < 8'd120) gust <= gust + 8'd2; else if (gust > 8'd124) gust <= gust - 8'd2;
                 end
+                else if (gust > 8'd3) gust <= gust - 8'd3; else gust <= 8'd0;
             end
             // explosion: full burst, decays over ~1.3 s
             if (explode_l)               boom_env <= 10'd1023;
             else if (boom_env != 10'd0 && step_cnt[4:0] == 5'd0) boom_env <= boom_env - 10'd1;
             boom_lp <= boom_lp + ((noise - boom_lp) >>> 3);
 
+            // REV6 chirp / engine oscillators
+            if (mode == M_BIRD) begin
+                chirp_t <= (chirp_t >= 14'd13400) ? 14'd0 : chirp_t + 14'd1;
+                if (chirp_t == 14'd0 || chirp_t == 14'd2400) chirp_inc <= 24'd2405000;   // 3.5 kHz
+                else if (chirp_inc > 24'd1500000) chirp_inc <= chirp_inc - 24'd700;    // sweep down
+                ph_chirp <= ph_chirp + chirp_inc;
+            end else chirp_t <= 14'd0;
+            ph_e1 <= ph_e1 + 24'd58410;      // ~85 Hz
+            ph_e2 <= ph_e2 + 24'd116820;     // ~170 Hz
+            prop  <= prop + 12'd2;           // ~12 Hz throb
+
             // ---- mixer (about -300..300) ----
             case (mode)
                 M_MUSIC:            mix <= mel_sq + bass_sq + kick_sq + clap_n;
                 M_VICTORY, M_DEATH: mix <= mel_sq + bass_sq;
-                M_LOUD:             mix <= $signed(wind_w[17:6]) + ($signed(wind_w[17:6]) >>> 1);   // x3 vs soft wind (signed shift)
-                default:            mix <= wind_w[18:7] + boom_w[19:8];          // soft wind + explosion
+                M_LOUD:             mix <= $signed(wind_w[17:6]) + ($signed(wind_w[17:6]) >>> 1);   // gust whoosh
+                M_PLANE:            mix <= $signed(eng_w[17:6]);                                      // engine drone
+                M_BIRD:             mix <= chirp_sq;                                                  // chirps
+                M_SOFT:             mix <= $signed(wind_w[17:6]) + $signed(boom_w[19:8]);            // REV7: cutscene wind (x2) + explosion
+                default:            mix <= (gust != 8'd0) ? $signed(wind_w[17:6]) : 12'sd0;         // silence (wind tail fades)
             endcase
         end
     end
 
     // ---------------- 1st-order delta-sigma DAC at 100 MHz ----------------
-    wire [9:0] level = mute ? 10'd512 : (10'd512 + mix[9:0]);
+    wire [9:0] level = (mute || pause) ? 10'd512 : (10'd512 + mix[9:0]);   // REV7: pause = silent
     reg  [10:0] acc = 11'd0;
     always @(posedge clk) begin
         acc     <= {1'b0, acc[9:0]} + {1'b0, level};
