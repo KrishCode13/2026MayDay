@@ -59,13 +59,13 @@ module render_engine (
     input  wire               pwarn_active,
     input  wire               pwarn_right,
     input  wire signed [7:0]  pwarn_y,
-    input  wire               flare_locked,   // C pressed -> freeze the flare-lane marker
-    input  wire [1:0]         bank_lvl,       // 0 level, 1 slight, 2 hard bank
+    input  wire               flare_locked,   
+    input  wire [1:0]         bank_lvl,       
     input  wire               bank_left,      
-    input  wire signed [2:0]  swing_dx,       // body offset under the canopy
-    input  wire               stunned,        // hit in freefall -> tumbling
+    input  wire signed [2:0]  swing_dx,       
+    input  wire               stunned,        
     // output
-    output reg  [15:0]        oled_data_game     // RGB565
+    output reg  [15:0]        oled_data_game     
 );
     `include "game_params.vh"
 
@@ -91,11 +91,11 @@ module render_engine (
     // -----------------------------------------------------------------
     reg [7:0]          anim_tick_cnt;
     reg signed [17:0]  ground_y_reg;
-    reg signed [15:0]  far_scroll_q88;   // accumulates scroll_vy to 2
-    reg signed [15:0]  near_scroll_q88;  // accumulates scroll_vy to 1
-    reg [3:0]          shake_timer;      // 10 ticks after strike
-    reg [3:0]          sparkle_timer;    // 10 ticks after crate_collected
-    reg [6:0]          wind_phase;       // horizontal drift phase for curly wind lines
+    reg signed [15:0]  far_scroll_q88;   
+    reg signed [15:0]  near_scroll_q88;  
+    reg [3:0]          shake_timer;      
+    reg [3:0]          sparkle_timer;    
+    reg [6:0]          wind_phase;       
 
     wire [15:0] alt_metres = altitude[23:8];
 
@@ -120,7 +120,7 @@ module render_engine (
 
     wire obs_anim_frame = anim_tick_cnt[3]; // Switches every 8 game_ticks (bird/debris)
     wire dmg_flap_frame = anim_tick_cnt[2]; // Switches every 4 game_ticks (damaged canopy)
-    wire blink_4hz      = ~anim_tick_cnt[3]; // ~4 Hz flash (8 ticks on, 8 ticks off)
+    wire blink_4hz      = ~anim_tick_cnt[3]; // 4 Hz flash (8 ticks on, 8 ticks off)
 
     // -----------------------------------------------------------------
     //   guidance text + crate star pop-up
@@ -198,8 +198,8 @@ module render_engine (
                 sky_lo = 16'h10E8;
             end
             3'd5: begin       // Sunset
-                sky_hi = 16'hCBD5;   // lighter pink-purple (was 494F) so birds stand out
-                sky_lo = 16'hFE52;   // soft peach (was FCC9)
+                sky_hi = 16'hCBD5;   // light pink-purple for birds
+                sky_lo = 16'hFE52;   // soft peach 
             end
             default: begin    // Day (levels 1, 3)
                 sky_hi = 16'h2B7A;
@@ -295,7 +295,7 @@ module render_engine (
     wire shake_active   = is_gameplay && ((shake_timer != 4'd0) || crash_shake_on);
     wire signed [8:0] shake_dx = shake_active ? (anim_tick_cnt[0] ? 9'sd2 : -9'sd2) : 9'sd0;
 
-    // Shaken screen X for world/gameplay layers; raw px_raw/py for fixed HUD & menus
+    // Shaken screen X for world layers; raw px_raw/py for fixed HUD & menus
     wire signed [8:0] px_raw = {2'b00, pixel_x};
     wire signed [8:0] py     = {3'b000, pixel_y};
     wire signed [8:0] px     = px_raw + shake_dx;
@@ -316,7 +316,7 @@ module render_engine (
     reg       hero_mirror_sel;
     reg       hero_vflip_sel;
 
-    // Spin-out horizontal offset for fail_reason == FR_TURBULENCE (reason 2)
+    // Spin-out horizontal offset for fail_reason == FR_TURBULENCE
     reg signed [8:0] crash_spin_dx;
     always @* begin
         crash_spin_dx = 9'sd0;
@@ -339,7 +339,7 @@ module render_engine (
                                   (landing_grade == 2'd2) ? (state_timer[2] ? 9'sd3 : -9'sd3) : 9'sd2;
     // the canopy was never opened (crash in freefall) -> never draw a parachute
     wire no_chute = (canopy_mode == CM_FREEFALL);
-    // red-zone flare = death: he lands, wobbles left right for 1 s, then falls flat
+    // red-zone flare = death: he lands, wobbles left right for 1s, then falls flat
     wire red_death  = is_crash_impact && (landing_grade == 2'd2);
     wire [7:0] lie_start = red_death ? 8'd60 : 8'd15;
     wire signed [8:0] death_wob = (red_death && state_timer < 8'd60) ?
@@ -356,7 +356,7 @@ module render_engine (
                                      (ground_y_reg[8:0] - 9'sd18)) :
         $signed(hero_y);
 
-    // Settling canopy vertical offset during S_LANDING (rows 0--11 descend into ground)
+    // Settling canopy vertical offset during S_LANDING (rows 0 - 11 descend into ground)
     wire [4:0] landing_canopy_drop =
         (game_state == S_LANDING) ? ((state_timer < 8'd48) ? state_timer[5:2] : 5'd12) : 5'd0;
 
@@ -403,10 +403,10 @@ module render_engine (
     end
 
     // -----------------------------------------------------------------
-    // STAGE 1: Per-Pixel Layer & Bounding Box Resolution
+    // STAGE 1: Per Pixel Layer & Bounding Box Resolution
     // -----------------------------------------------------------------
 
-    // --- Layer 2 & 3: Parallax Clouds (index 3) ---
+    // --- Layer 2 & 3: Parallax Clouds ---
     wire [5:0] far_y  = pixel_y + far_scroll_q88[13:8];
     wire [5:0] near_y = pixel_y + near_scroll_q88[13:8];
     wire [6:0] px_clamped = (px < 9'sd0) ? 7'd0 : (px > 9'sd95) ? 7'd95 : px[6:0];
@@ -435,7 +435,7 @@ module render_engine (
 
     reg [4:0] s1_ground_color;
     always @* begin
-        s1_ground_color = 5'd12; // Default: Ground main (index 12)
+        s1_ground_color = 5'd12; // Default: Ground main 
         if (s1_in_ground) begin
             if (in_spot_x && ground_rel_y < 6'd7) begin
                 case (level)
@@ -454,7 +454,7 @@ module render_engine (
                         else
                             s1_ground_color = 5'd1;
                     end
-                    // Sunset (level 5): Sandpit using palette index 18
+                    // Sunset (level 5): Sandpit using palette
                     3'd5: begin
                         if (ground_rel_y < 6'd4) begin
                             if (spot_rel_x == 4'd0 || spot_rel_x == 4'd15 || ground_rel_y == 6'd3)
@@ -571,7 +571,7 @@ module render_engine (
     wire signed [3:0] lean_px  = !flying_canopy ? 4'sd0 : (bank_left ? -lean_mag : lean_mag);
     wire [4:0] raw_hero_row = in_hero_box ? (py - hy) : 5'd0;
 
-    // During S_LANDING, rows 0..11 (canopy) settle down behind the hero and vanish at tick 48
+    // During S_LANDING, rows 0 - 11 (canopy) settle down behind the hero and vanish at tick 48
     wire canopy_settled_out = (game_state == S_LANDING) &&
                               ((raw_hero_row < 5'd12) &&
                                ((state_timer >= 8'd48) || (raw_hero_row < landing_canopy_drop)));
@@ -602,7 +602,7 @@ module render_engine (
     wire signed [8:0] rel_bx  = px - body_cx;
     wire signed [8:0] rel_by  = py - body_cy;
 
-    // 8-point circular lookup table around hero body centre for magnet aura (radius ~9 px)
+    // 8-point circular lookup table around hero body centre for magnet aura (radius 9 px)
     function signed [8:0] aura_lut_x;
         input [2:0] idx;
         begin
@@ -653,7 +653,7 @@ module render_engine (
         ((rel_by ==  spk_r || rel_by == -spk_r) && (rel_bx == 9'sd0));
     wire fx_sparkle_on = is_gameplay && (sparkle_timer != 4'd0) && in_sparkle_pt;
 
-    // Curly wind lines: 1..3 cyan wavy streaks drifting toward gust_dir
+    // Curly wind lines: 1 - 3 cyan wavy streaks drifting toward gust_dir
     wire [6:0] wind_x = px_clamped + wind_phase;
     wire [5:0] curl_dy = wind_x[2] ? 6'd1 : 6'd0;
     wire wind_seg_on = (wind_x[4:0] < 5'd14); // 14-px streak every 32 px horizontally
@@ -663,7 +663,7 @@ module render_engine (
     wire fx_wind_on = is_gameplay && (gust_warn || gust_active) &&
                       (wind_line1 || wind_line2 || wind_line3);
 
-    // Hard landing dust puff (ticks 5..45 of S_LANDING when landing_grade == 1)
+    // Hard landing dust puff (ticks 5 - 45 of S_LANDING when landing_grade == 1)
     // and Crash ground impact debris burst
     wire signed [8:0] foot_y = ground_y_reg[8:0] - 9'sd2;
     wire signed [8:0] dust_r = (game_state == S_LANDING) ?
@@ -739,10 +739,10 @@ module render_engine (
                          ((pixel_x[1:0] + pixel_y[1:0]) == 2'b00));
     wire s1_in_edge_band = left_band_on || right_band_on;
 
-    // 2. Flare lane at x = 86..91 in S_FINAL_APPROACH (y = 4..59; interior y = 5..58, 54 px tall)
-    //    Top half (y = 5..31, 27 px) maps 150 m -> 30 m using shifts:
+    // 2. Flare lane at x = 86 - 91 in S_FINAL_APPROACH (y = 4 - 59; interior y = 5 - 58, 54 px tall)
+    //    Top half (y = 5 - 31, 27 px) maps 150 m -> 30 m using shifts:
     //      offset = ((150 - alt) >> 2) - ((150 - alt) >> 5)  [maps 120 m span to 27 px]
-    //    Bottom half (y = 32..58, 27 px) maps 30 m -> 0 m using shifts:
+    //    Bottom half (y = 32 - 58, 27 px) maps 30 m -> 0 m using shifts:
     //      offset = (30 - alt) - ((30 - alt) >> 3)           [maps 30 m span to 27 px]
     wire [7:0] alt_clamped_150 = (alt_metres > 16'd150) ? 8'd150 : alt_metres[7:0];
     // once C is pressed the marker FREEZES at the press height, so the
@@ -771,15 +771,15 @@ module render_engine (
             if (in_flare_marker ||
                 pixel_x == FLARE_LANE_X || pixel_x == (FLARE_LANE_X + 7'd5) ||
                 pixel_y == 6'd4 || pixel_y == 6'd59) begin
-                s1_flare_color = 5'd1; // Black 4x3 marker or 1-px lane outline
+                s1_flare_color = 5'd1; // Black 4x3 marker or 1 px lane outline
             end else if (pixel_y < 6'd34) begin
                 s1_flare_color = 5'd11; // Red zone (> 28 m)
             end else if (pixel_y < 6'd43) begin
-                s1_flare_color = 5'd10; // Yellow hard zone (28..18 m)
+                s1_flare_color = 5'd10; // Yellow hard zone (28 - 18 m)
             end else if (pixel_y < 6'd55) begin
-                s1_flare_color = 5'd19; // Bright green soft zone (18..4 m)
+                s1_flare_color = 5'd19; // Bright green soft zone (18 - 4 m)
             end else if (pixel_y < 6'd58) begin
-                s1_flare_color = 5'd10; // Yellow hard zone (4..1 m)
+                s1_flare_color = 5'd10; // Yellow hard zone (4 - 1 m)
             end else begin
                 s1_flare_color = 5'd11; // Red zone (< 1 m)
             end
@@ -812,7 +812,7 @@ module render_engine (
 
     // Shown in FINAL_APPROACH once the ground is on screen.
     wire signed [17:0] spot_star_y0 = ground_y_reg - 18'sd10;
-    wire [7:0] spot_star_x0 = target_x + 8'd3;            // centred on the 16-px spot
+    wire [7:0] spot_star_x0 = target_x + 8'd3;            // centred on the 16 px spot
     wire in_spot_star = (game_state == S_FINAL_APPROACH) && (ground_y_reg <= 18'sd63) &&
                         (pixel_x >= spot_star_x0[6:0]) && (pixel_x < spot_star_x0[6:0] + 7'd9) &&
                         ($signed({12'd0, pixel_y}) >= spot_star_y0) &&
@@ -833,7 +833,7 @@ module render_engine (
                        (px_raw >= pop_x0) && (px_raw < pop_x0 + 9'sd9) &&
                        (pop_row >= 10'sd0) && (pop_row < 10'sd9);
 
-    // Menu 9x9 stars on S_LEVEL_COMPLETE (3 vertical rows) and S_VICTORY (double-size 18x18)
+    // Menu 9x9 stars on S_LEVEL_COMPLETE (3 vertical rows) and S_VICTORY (double size 18x18)
     wire in_lc_star1 = (game_state == S_LEVEL_COMPLETE) && (state_timer >= T_STAR1) &&
                        (pixel_x >= 7'd6 && pixel_x < 7'd15) && (pixel_y >= 6'd5  && pixel_y < 6'd14);
     wire in_lc_star2 = (game_state == S_LEVEL_COMPLETE) && (state_timer >= T_STAR2) &&
@@ -932,7 +932,7 @@ module render_engine (
     reg [6:0]  tx, char_idx, char_rem;
     reg [5:0]  ty;
 
-    // Helper: divide 0..95 by 6 (character pitch = 5 px glyph + 1 px gap) without a divider
+    // Helper: divide 0 - 95 by 6 (character pitch = 5 px glyph + 1 px gap) without a divider
     function [3:0] div6;
         input [6:0] val;
         begin
@@ -1065,7 +1065,7 @@ module render_engine (
         else if (press_c_on && blink_4hz &&
                  (pixel_y >= 6'd26 && pixel_y < 6'd33) &&
                  (pixel_x >= 7'd28 && pixel_x < 7'd69)) begin
-            ty            = pixel_y - 6'd26;      // mid-screen
+            ty            = pixel_y - 6'd26;      // mid screen
             tx            = pixel_x - 7'd28;
             char_idx      = div6(tx);
             char_rem      = tx - (char_idx * 7'd6);
@@ -1096,7 +1096,7 @@ module render_engine (
             char_idx      = div6(tx);
             char_rem      = tx - (char_idx * 7'd6);
             s1_text_row   = ty[2:0];
-            // darker text on light skies (navy; REPAIRED! dark green)
+            // darker text on light skies (navy REPAIRED! dark green)
             s1_text_color = (msg_id == 4'd9) ? (light_bg ? 5'd13 : 5'd19) : hud_hi_col;
             if (char_rem < 7'd5 && char_idx < msg_len) begin
                 s1_in_text   = 1'b1;
@@ -1109,7 +1109,7 @@ module render_engine (
         // 2. S_HOME Screen
         // -------------------------------------------------------------
         else if (game_state == S_HOME) begin
-            // (a) Double-size "MAYDAY" in Gold (y = 3..16, x = 13..82)
+            // (a) Double-size "MAYDAY" in Gold (y = 3 - 16, x = 13 - 82)
             if (pixel_y >= 6'd3 && pixel_y < 6'd17 && pixel_x >= 7'd13 && pixel_x < 7'd83) begin
                 ty            = (pixel_y - 6'd3) >> 1;
                 tx            = (pixel_x - 7'd13) >> 1;
@@ -1132,7 +1132,7 @@ module render_engine (
                 end
             end
 
-            // (b) Five Level Boxes (14x14 at y = 22..35) & Best Stars (y = 38..40)
+            // (b) Five Level Boxes (14x14 at y = 22 - 35) & Best Stars (y = 38 - 40)
             if      (pixel_x >= 7'd5  && pixel_x < 7'd19) begin in_any_home_box = 1'b1; home_box_id = 3'd0; box_rx = pixel_x - 7'd5;  end
             else if (pixel_x >= 7'd23 && pixel_x < 7'd37) begin in_any_home_box = 1'b1; home_box_id = 3'd1; box_rx = pixel_x - 7'd23; end
             else if (pixel_x >= 7'd41 && pixel_x < 7'd55) begin in_any_home_box = 1'b1; home_box_id = 3'd2; box_rx = pixel_x - 7'd41; end
@@ -1173,7 +1173,7 @@ module render_engine (
             end
 
             // bottom prompt: [left arrow] [right arrow]  (circle) GO
-            //     y = 52..58. Arrows = choose level (BTNL / BTNR),
+            //     y = 52 - 58. Arrows = choose level (BTNL / BTNR),
             //     circle = centre button (BTNC) = start.
             if (pixel_y >= 6'd52 && pixel_y < 6'd59) begin
                 hy7 = pixel_y - 6'd52;
@@ -1294,13 +1294,13 @@ module render_engine (
         // -------------------------------------------------------------
         // 4. S_LEVEL_COMPLETE Screen
         //    Vertical star rows (revealed at ticks 30, 60, 90):
-        //      Row 1 (y=6..12):  "ALL CRATES"
-        //      Row 2 (y=19..25): "LANDED"
-        //      Row 3 (y=32..38): "PERFECT LAND"
-        //    Bottom options (y=52..58): "NEXT"/"DONE", "RETRY", "HOME"
+        //      Row 1 (y=6 - 12):  "ALL CRATES"
+        //      Row 2 (y=19 - 25): "LANDED"
+        //      Row 3 (y=32 - 38): "PERFECT LAND"
+        //    Bottom options (y=52 - 58): "NEXT"/"DONE", "RETRY", "HOME"
         // -------------------------------------------------------------
         else if (game_state == S_LEVEL_COMPLETE) begin
-            // Row 1: "ALL CRATES" at x = 18..77, y = 6..12
+            // Row 1: "ALL CRATES" at x = 18 - 77, y = 6 - 12
             if ((state_timer >= T_STAR1) &&
                 (pixel_y >= 6'd6 && pixel_y < 6'd13) &&
                 (pixel_x >= 7'd18 && pixel_x < 7'd78)) begin
@@ -1327,7 +1327,7 @@ module render_engine (
                     endcase
                 end
             end
-            // Row 2: "LANDED" at x = 18..53, y = 19..25
+            // Row 2: "LANDED" at x = 18 - 53, y = 19 - 25
             else if ((state_timer >= T_STAR2) &&
                      (pixel_y >= 6'd19 && pixel_y < 6'd26) &&
                      (pixel_x >= 7'd18 && pixel_x < 7'd54)) begin
@@ -1351,7 +1351,7 @@ module render_engine (
                     endcase
                 end
             end
-            // Row 3: "PERFECT LAND" at x = 18..89, y = 32..38
+            // Row 3: "PERFECT LAND" at x = 18 - 89, y = 32 - 38
             else if ((state_timer >= T_STAR3) &&
                      (pixel_y >= 6'd32 && pixel_y < 6'd39) &&
                      (pixel_x >= 7'd18 && pixel_x < 7'd90)) begin
@@ -1380,7 +1380,7 @@ module render_engine (
                     endcase
                 end
             end
-            // Bottom menu options: NEXT/DONE (x=3..25), RETRY (x=33..61), HOME (x=69..91) at y=52..58
+            // Bottom menu options: NEXT/DONE (x=3 - 25), RETRY (x=33 - 61), HOME (x=69 - 91) at y=52 - 58
             else if (pixel_y >= 6'd52 && pixel_y < 6'd59) begin
                 ty          = pixel_y - 6'd52;
                 s1_text_row = ty[2:0];
@@ -1460,7 +1460,7 @@ module render_engine (
         // 5. S_LEVEL_FAILED Screen ("FAILED" in red, fail_reason, RETRY / HOME)
         // -------------------------------------------------------------
         else if (game_state == S_LEVEL_FAILED) begin
-            // (a) Double-size "FAILED" in Red (index 11) at y = 6..19, x = 13..82
+            // (a) Double-size "FAILED" in Red at y = 6 - 19, x = 13 - 82
             if (pixel_y >= 6'd6 && pixel_y < 6'd20 && pixel_x >= 7'd13 && pixel_x < 7'd83) begin
                 ty            = (pixel_y - 6'd6) >> 1;
                 tx            = (pixel_x - 7'd13) >> 1;
@@ -1482,7 +1482,7 @@ module render_engine (
                     endcase
                 end
             end
-            // (b) Reason text at y = 29..35 in White
+            // (b) Reason text at y = 29 - 35 in White
             else if (pixel_y >= 6'd29 && pixel_y < 6'd36 && pixel_x >= 7'd15 && pixel_x < 7'd81) begin
                 ty            = pixel_y - 6'd29;
                 tx            = pixel_x - 7'd15;
@@ -1561,7 +1561,7 @@ module render_engine (
                     endcase
                 end
             end
-            // (c) Bottom options: RETRY (x=15..43) and HOME (x=57..79) at y=50..56
+            // (c) Bottom options: RETRY (x=15 - 43) and HOME (x=57 - 79) at y=50 - 56
             else if (pixel_y >= 6'd50 && pixel_y < 6'd57) begin
                 ty          = pixel_y - 6'd50;
                 s1_text_row = ty[2:0];
@@ -1614,7 +1614,7 @@ module render_engine (
         // 6. S_VICTORY Screen ("YOU MADE IT!", big gold star, total_stars/15, "C: HOME")
         // -------------------------------------------------------------
         else if (game_state == S_VICTORY) begin
-            // (a) "YOU MADE IT!" in Gold at y = 5..11, x = 13..83
+            // (a) "YOU MADE IT!" in Gold at y = 5 - 11, x = 13 - 83
             if (pixel_y >= 6'd5 && pixel_y < 6'd12 && pixel_x >= 7'd13 && pixel_x < 7'd84) begin
                 ty            = pixel_y - 6'd5;
                 tx            = pixel_x - 7'd13;
@@ -1640,7 +1640,7 @@ module render_engine (
                     endcase
                 end
             end
-            // (b) "nn/15" total stars at y = 38..44, x = 33..61 in White
+            // (b) "nn/15" total stars at y = 38 - 44, x = 33 - 61 in White
             else if (pixel_y >= 6'd38 && pixel_y < 6'd45 && pixel_x >= 7'd33 && pixel_x < 7'd62) begin
                 ty            = pixel_y - 6'd38;
                 tx            = pixel_x - 7'd33;
@@ -1661,7 +1661,7 @@ module render_engine (
                     endcase
                 end
             end
-            // (c) "C: HOME" at y = 52..58, x = 27..67 in Gold
+            // (c) "C: HOME" at y = 52 - 58, x = 27 - 67 in Gold
             else if (pixel_y >= 6'd52 && pixel_y < 6'd59 && pixel_x >= 7'd27 && pixel_x < 7'd68) begin
                 ty            = pixel_y - 6'd52;
                 tx            = pixel_x - 7'd27;
@@ -1768,7 +1768,7 @@ module render_engine (
     end
 
     // -----------------------------------------------------------------
-    // STAGE 2: Shared Sprite & Font ROM Lookups, 10-Layer Compositor & Palette
+    // STAGE 2: Shared Sprite & Font ROM Lookups, 10 Layer Compositor & Palette
     // -----------------------------------------------------------------
     wire [4:0] rom_hero_color;
     wire [4:0] rom_obs_color;
@@ -1807,8 +1807,8 @@ module render_engine (
     );
     wire font_pixel_on = s2_in_text && font_row_bits[3'd4 - s2_text_col];
 
-    // 10-Layer Priority Compositor (Front-to-Back, ignoring transparent index 0):
-    //   10. Full-screen flash (white index 2)
+    // 10-Layer Priority Compositor (Front-to-Back, ignoring transparent:
+    //   10. Full-screen flash
     //    9. HUD (crate counter, lock, warning, landing arrow, flare lane, edge bands)
     //    8. Effects (pickup sparkle, magnet aura, curly wind lines, dust/debris)
     //    7. Hero
@@ -1826,7 +1826,7 @@ module render_engine (
         use_sky_gradient = 1'b0;
 
         if (!s2_is_gameplay) begin
-            // Menu screens: Text > 9x9 Star Icon > Box/Underline > Navy background (index 7)
+            // Menu screens: Text > 9x9 Star Icon > Box/Underline > Navy background
             if (font_pixel_on)
                 chosen_idx = s2_text_color;
             else if (s2_in_icon && (rom_icon_color != 5'd0))
