@@ -1,15 +1,3 @@
-// =====================================================================
-// input_ctrl.v  --  MEMBER 4. Debounced buttons for MAYDAY.
-// For each of BTNL, BTNR, BTNC it produces:
-//   *_held  : clean level (steering, brake, flare need "is it down now?")
-//   *_press : one 100 MHz-cycle pulse per physical press, with a 200 ms
-//             lockout (menus and deploy need "it was pressed once")
-// Pipeline per button:
-//   raw pin -> 2-FF synchroniser -> sampled every 1 ms -> 5-sample
-//   agreement filter (held) -> rising-edge detect + lockout (press)
-// Ports: same names as the kit stub; the held outputs are now driven by a
-// sub-module (wire, not reg). No change needed in My_Top_Module.v.
-// =====================================================================
 module input_ctrl (
     input  wire clk,
     input  wire btnL, btnR, btnC, btnU,
@@ -20,7 +8,6 @@ module input_ctrl (
 
     // ---- Shared 1 ms sample strobe ----------------------------------
     // Counts 0 .. SAMPLE_CYCLES-1 and pulses ms_tick for one cycle on wrap.
-    // One strobe is shared by all three buttons to save logic.
     reg [16:0] ms_cnt  = 17'd0;
     reg        ms_tick = 1'b0;
     always @(posedge clk) begin
@@ -40,13 +27,11 @@ module input_ctrl (
                       .held(right_held),  .press(right_press));
     btn_debounce u_c (.clk(clk), .ms_tick(ms_tick), .btn_raw(btnC),
                       .held(center_held), .press(center_press));
-    btn_debounce u_u (.clk(clk), .ms_tick(ms_tick), .btn_raw(btnU),   // NEW: brake button
+    btn_debounce u_u (.clk(clk), .ms_tick(ms_tick), .btn_raw(btnU),   
                       .held(up_held),     .press(up_press));
 endmodule
 
-// =====================================================================
-// btn_debounce -- one button. Helper inside input_ctrl.v.
-// =====================================================================
+// btn_debounce -- one button. Helper inside input_ctrl.v. I did this instead of creating another new file
 module btn_debounce (
     input  wire clk,
     input  wire ms_tick,     // 1-cycle strobe every 1 ms
