@@ -82,7 +82,7 @@ module game_director (
                 if (hero_crash)                 next_state = S_CRASH;
                 else if (alt_m <= ALT_TOO_LATE) next_state = S_CRASH;   // too late
                 else if (center_press && (state_timer >= T_UNLOCK_ANIM))
-                                                next_state = S_CANOPY;  // deploy (REV9: after the lock icon goes)
+                                                next_state = S_CANOPY;  // deploy (after the lock icon goes)
             S_CANOPY:
                 if (hero_crash)                 next_state = S_CRASH;
                 else if (alt_m <= ALT_FINAL)    next_state = S_FINAL_APPROACH;
