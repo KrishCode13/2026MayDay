@@ -1,7 +1,7 @@
 module input_ctrl (
     input  wire clk,
     input  wire btnL, btnR, btnC, btnU,
-    output wire left_held, right_held, center_held, up_held,   // NEW: up_held = brake (tug)
+    output wire left_held, right_held, center_held, up_held,   // up_held = brake (tug)
     output wire left_press, right_press, center_press, up_press
 );
     `include "game_params.vh"
