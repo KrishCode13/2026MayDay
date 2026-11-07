@@ -810,7 +810,6 @@ module render_engine (
                             (pixel_x >= arrow_x0[6:0]) && (pixel_x < arrow_x0[6:0] + 7'd18) &&
                             (pixel_y >= arrow_y0) && (pixel_y < arrow_y0 + 6'd18);
 
-    // FIX #15: gold 9x9 star standing on the landing spot, so the target is obvious.
     // Shown in FINAL_APPROACH once the ground is on screen.
     wire signed [17:0] spot_star_y0 = ground_y_reg - 18'sd10;
     wire [7:0] spot_star_x0 = target_x + 8'd3;            // centred on the 16-px spot
@@ -882,7 +881,7 @@ module render_engine (
             s1_icon_id  = 3'd4;
             s1_icon_col = px_raw - pop_x0;
             s1_icon_row = pop_row[3:0];
-        end else if (in_spot_star) begin   // FIX #15
+        end else if (in_spot_star) begin   
             s1_in_icon  = 1'b1;
             s1_icon_id  = 3'd4;               // gold star icon
             s1_icon_col = pixel_x - spot_star_x0[6:0];
@@ -1007,7 +1006,6 @@ module render_engine (
     wire [4:0] hud_txt_col = light_bg ? 5'd7 : 5'd2;    // navy on light skies, white at night
     wire [4:0] hud_hi_col  = light_bg ? 5'd7 : 5'd10;   // navy on light skies, gold at night
 
-    // FIX #14 / #5: when to show the "PRESS C" prompt
     // shown for the WHOLE deploy window, from the moment the lock disappears
     // only once the lock icon has gone - exactly when C starts to work
     wire press_c_on = ((game_state == S_FREEFALL_WINDOW) && (state_timer >= T_UNLOCK_ANIM)) ||
@@ -1063,12 +1061,7 @@ module render_engine (
             end
         end
 
-        // -----------------------------------------------------------------
-        // 1b. NEW (FIX #14 / #5): blinking gold "PRESS C" at the top centre
-        //     - deploy: perfect window 1,550-1,450 m (LED gauge full)
-        //     - landing flare: soft (green) window
-        // ---------------------------------------------------------------
-        // moved from the top to the middle of the screen (rows 44-50)
+        // gauge
         else if (press_c_on && blink_4hz &&
                  (pixel_y >= 6'd26 && pixel_y < 6'd33) &&
                  (pixel_x >= 7'd28 && pixel_x < 7'd69)) begin
