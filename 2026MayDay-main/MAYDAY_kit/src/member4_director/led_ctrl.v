@@ -1,19 +1,3 @@
-// =====================================================================
-// led_ctrl.v  --  MEMBER 4. The 16 LEDs, one job per state (ICD table).
-// PORT CHANGE vs kit: added gust_warn and gust_active (from Member 1) so
-// wind is shown only while a gust is coming or blowing. My_Top_Module.v
-// is updated to match. `led` is now a registered output.
-//
-//   HOME, CUTSCENE, LEVEL_INTRO,
-//   LEVEL_FAILED, VICTORY      slow chaser (one LED walks LD0 -> LD15)
-//   FREEFALL_LOCKED            all off
-//   FREEFALL_WINDOW            bar fills 1,700 -> 1,550 m; steady full
-//                              1,550 -> 1,450 m; rapid flash below 1,450 m
-//   CANOPY / FINAL_APPROACH    magnet drain (priority), else wind
-//   LANDING                    off (not in ICD table; keeps focus on OLED)
-//   CRASH                      all flash
-//   LEVEL_COMPLETE             3 groups light at ticks 30/60/90 per star
-// =====================================================================
 module led_ctrl (
     input  wire        clk,
     input  wire        game_tick,
