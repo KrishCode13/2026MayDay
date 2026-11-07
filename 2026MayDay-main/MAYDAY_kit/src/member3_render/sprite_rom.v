@@ -361,7 +361,7 @@ module sprite_rom (
                     default: icon_row_bits = 45'd0;
                 endcase
             end
-            3'd3: begin // REV5: big landing arrow
+            3'd3: begin // big landing arrow
                 case (icon_row)
                     4'd0: icon_row_bits = {__,__,KK,KK,KK,KK,KK,__,__};
                     4'd1: icon_row_bits = {__,__,KK,YY,YY,YY,KK,__,__};
