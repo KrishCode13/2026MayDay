@@ -1,18 +1,12 @@
 // =====================================================================
-// render_engine.v  --  MEMBER 3 (Gameplay rendering and menus)
-// Checkpoint 3 (Feature-Complete) build:
-//   - All 10 ICD compositor layers active in exact front-to-back priority:
-//     10: Full-screen flash -> 9: HUD & flare lane -> 8: Effects ->
-//     7: Hero -> 6: Obstacles -> 5: Crates -> 4: Ground & landing spot ->
-//     3: Near clouds -> 2: Far clouds -> 1: Stepped sky gradient.
-//   - Shift-only two-part flare lane mapping (150-30 m top, 30-0 m bottom).
-//   - Screen shake (strike/crash), curly wind lines, 8-LUT magnet aura,
-//     10-tick crate pickup sparkle.
-//   - S_CRASH (120-tick plunge at 6 px/tick + turbulence spin-out, or
-//     30-tick impact-only) and S_LANDING (90-tick soft canopy settle or
-//     hard stumble + dust puff).
-//   - All 5 menu screens: S_HOME, S_LEVEL_INTRO, S_LEVEL_COMPLETE,
-//     S_LEVEL_FAILED, S_VICTORY.
+// render_engine.v - Gameplay Render and Menu - MEBER 3
+// Checkpoint 3 build:
+//   - Order that ICD exeutes:
+//     10: Full-screen flash -> 9: HUD & flare lane -> 8: Effects -> 7: Hero -> 6: Obstacles -> 5: Crates -> 4: Ground & landing spot -> 3: Near clouds -> 2: Far clouds -> 1: Stepped sky gradient.
+//   - Shift only two part flare lane mapping (150-30 m top, 30-0 m bottom).
+//   - Screen shake, curly wind lines, 8-LUT magnet aura, 10-tick crate pickup sparkle. 
+//   - S_CRASH and S_LANDING.
+//   - 5 menu screens: S_HOME, S_LEVEL_INTRO, S_LEVEL_COMPLETE, S_LEVEL_FAILED, S_VICTORY.
 // =====================================================================
 module render_engine (
     input  wire               clk,
@@ -30,7 +24,7 @@ module render_engine (
     input  wire [9:0]         best_stars,
     input  wire [3:0]         total_stars,
     input  wire [2:0]         crates_got,
-    input  wire [2:0]         fail_reason,     // REV6: 3 bits (4 = knocked out)
+    input  wire [2:0]         fail_reason,   
     // from Member 1
     input  wire signed [7:0]  hero_x,
     input  wire signed [7:0]  hero_y,
@@ -43,7 +37,7 @@ module render_engine (
     input  wire               gust_active,
     input  wire               gust_dir,
     input  wire [1:0]         gust_strength,
-    input  wire [1:0]         landing_grade,   // REV6: 0 soft, 1 hard, 2 very hard (red)
+    input  wire [1:0]         landing_grade,  
     // from Member 2
     input  wire [47:0]        obs_x,
     input  wire [47:0]        obs_y,
@@ -61,15 +55,15 @@ module render_engine (
     input  wire               crate_collected,
     input  wire [2:0]         crates_level_total,
     input  wire               magnet_active,
-    // REV3: plane side-edge warning from Member 2
+    // plane side-edge warning from Member 2
     input  wire               pwarn_active,
     input  wire               pwarn_right,
     input  wire signed [7:0]  pwarn_y,
-    input  wire               flare_locked,   // REV5: C pressed -> freeze the flare-lane marker
-    input  wire [1:0]         bank_lvl,       // REV6: 0 level, 1 slight, 2 hard bank
-    input  wire               bank_left,      // REV6
-    input  wire signed [2:0]  swing_dx,       // REV6: body offset under the canopy
-    input  wire               stunned,        // REV6: hit in freefall -> tumbling
+    input  wire               flare_locked,   // C pressed -> freeze the flare-lane marker
+    input  wire [1:0]         bank_lvl,       // 0 level, 1 slight, 2 hard bank
+    input  wire               bank_left,      
+    input  wire signed [2:0]  swing_dx,       // body offset under the canopy
+    input  wire               stunned,        // hit in freefall -> tumbling
     // output
     output reg  [15:0]        oled_data_game     // RGB565
 );
@@ -81,11 +75,10 @@ module render_engine (
     wire is_gameplay = (game_state >= S_FREEFALL_LOCKED) && (game_state <= S_CRASH);
     wire is_menu     = !is_gameplay;
 
-    // Crash sub-modes driven by fail_reason
+    // Crash sub-modes driven by fail reason
     wire is_crash_plunge = (game_state == S_CRASH) && (fail_reason != FR_HARD_IMPACT);
     wire is_crash_impact = (game_state == S_CRASH) && (fail_reason == FR_HARD_IMPACT);
-    // REV7: crash with the ground already close (e.g. hitting the wall just before
-    // landing): no long plunge - he tumbles straight down from where he was and lies there
+    // crash with the ground already close (e.g. hitting the wall just before landing): no long plunge - he tumbles straight down from where he was and lies there
     wire is_crash_short  = is_crash_plunge && (alt_metres < 16'd60);
     wire signed [9:0] short_fall_y = $signed({hero_y[7], hero_y[7], hero_y}) + $signed({2'd0, state_timer});
     wire signed [9:0] short_land_y = $signed(ground_y_reg[9:0]) - 10'sd18;
@@ -94,20 +87,20 @@ module render_engine (
     wire plunge_down = is_crash_plunge && !plunge_air;
 
     // -----------------------------------------------------------------
-    // Animation Timers, Parallax Accumulators & 18-bit Ground Y
+    // Animation Timers, Parallax Accumulators and 18 bit Ground Y
     // -----------------------------------------------------------------
     reg [7:0]          anim_tick_cnt;
     reg signed [17:0]  ground_y_reg;
-    reg signed [15:0]  far_scroll_q88;   // accumulates scroll_vy >>> 2
-    reg signed [15:0]  near_scroll_q88;  // accumulates scroll_vy >>> 1
+    reg signed [15:0]  far_scroll_q88;   // accumulates scroll_vy to 2
+    reg signed [15:0]  near_scroll_q88;  // accumulates scroll_vy to 1
     reg [3:0]          shake_timer;      // 10 ticks after strike
     reg [3:0]          sparkle_timer;    // 10 ticks after crate_collected
     reg [6:0]          wind_phase;       // horizontal drift phase for curly wind lines
 
     wire [15:0] alt_metres = altitude[23:8];
 
-    // Normal ground top: hero_y + 20 + altitude[23:8].
-    // During S_CRASH plunge (reasons 0..2), ground rushes up from y=254 to y=44 at 6 px/tick
+    // Normal ground top - hero_y + 20 + altitude[23:8].
+    // During S_CRASH, ground rushes up from y=254 to y=44 at 6 pixels/tick
     // over the first 90 ticks so touchdown/impact happens at tick 90.
     wire signed [17:0] plunge_ground_y =
         (state_timer < 8'd55) ? 18'sd254 :
@@ -119,7 +112,7 @@ module render_engine (
         (is_crash_impact || game_state == S_LANDING) ? 18'sd54 :
         ($signed(hero_y) + 18'sd20 + $signed({2'b00, alt_metres}));
 
-    // Effective vertical scroll speed (6.0 px/tick = 16'sd1536 in Q8.8 during crash plunge)
+    // Effective vertical scroll speed (6.0 pix/tick = 16'sd1536 in during crash plunge)
     wire signed [15:0] eff_scroll_vy =
         (plunge_air && !is_crash_short) ? 16'sd1536 :
         (game_state == S_LANDING || is_crash_impact || is_crash_short) ? 16'sd0 :
@@ -131,9 +124,7 @@ module render_engine (
 
     // -----------------------------------------------------------------
     // REV3: guidance text + crate star pop-up
-    //   msg_id: 1 AVOID BIRDS  2 GRAB CRATES  3 WIND! STEER  4 PRESS C AT GREEN
-    //           5 STRONGER WIND  6 DEBRIS ABOVE!  7 PLANES! TUG UP
-    //           8 FINAL DESCENT  9 REPAIRED!
+    //   msg_id: 1 AVOID BIRDS  2 GRAB CRATES  3 WIND! STEER  4 PRESS C AT GREEN 5 STRONGER WIND  6 DEBRIS ABOVE!  7 PLANES! TUG UP 8 FINAL DESCENT  9 REPAIRED!
     //   Level 1 shows a message every time a bird/crate/gust appears (tutorial).
     //   Levels 2-5 show one message only when that level's new element first appears.
     // -----------------------------------------------------------------
@@ -147,7 +138,7 @@ module render_engine (
     reg [1:0] lines_d = 2'd0;
     reg       intro_done = 1'b0;
     reg       stun_d = 1'b0;
-    always @(posedge clk) stun_d <= stunned;              // levels 2-5: new-element message shown once
+    always @(posedge clk) stun_d <= stunned;              // levels 2-5: new element message shown once
     integer   m;
     reg       new_bird;
     always @* begin
@@ -168,7 +159,7 @@ module render_engine (
             else if (game_tick && pop_timer != 5'd0) pop_timer <= pop_timer - 5'd1;
 
             if (stunned && !stun_d) begin
-                msg_id <= 4'd10; msg_timer <= 8'd90;                         // REV6: STUNNED!
+                msg_id <= 4'd10; msg_timer <= 8'd90;                         // STUNNED!
             end else if ((lines_d == 2'd1) && (lines_snapped == 2'd0) && is_gameplay) begin
                 msg_id <= 4'd9;  msg_timer <= 8'd120;                         // REPAIRED!
             end else if (level == 3'd1) begin
@@ -192,7 +183,7 @@ module render_engine (
     wire msg_on = is_gameplay && (game_state != S_CRASH) && (msg_timer != 8'd0) && (msg_id != 4'd0);
 
     // -----------------------------------------------------------------
-    // Stepped Sky Gradient (16 bands from altitude[23:8] >> 7, on game_tick)
+    // Stepped Sky Gradient (16 bands from altitude[23:8] to 7, on game_tick)
     // -----------------------------------------------------------------
     wire [8:0] alt_shifted = alt_metres[15:7];
     wire [3:0] sky_band    = is_crash_plunge ?
@@ -207,8 +198,8 @@ module render_engine (
                 sky_lo = 16'h10E8;
             end
             3'd5: begin       // Sunset
-                sky_hi = 16'hCBD5;   // REV3: lighter pink-purple (was 494F) so birds stand out
-                sky_lo = 16'hFE52;   // REV3: soft peach (was FCC9)
+                sky_hi = 16'hCBD5;   // lighter pink-purple (was 494F) so birds stand out
+                sky_lo = 16'hFE52;   // soft peach (was FCC9)
             end
             default: begin    // Day (levels 1, 3)
                 sky_hi = 16'h2B7A;
@@ -246,7 +237,7 @@ module render_engine (
 
     reg [15:0] sky_rgb_reg;
 
-    // Synchronous state updates: strictly on game_tick (except single-cycle event pulse latches)
+    // Synchronous state updates: strictly on game_tick (except single cycle event pulse)
     always @(posedge clk) begin
         if (rst) begin
             anim_tick_cnt   <= 8'd0;
@@ -267,7 +258,7 @@ module render_engine (
             sparkle_timer   <= 4'd0;
             wind_phase      <= 7'd0;
         end else begin
-            // Latch 1-cycle event pulses from Member 2 immediately, decrement on game_tick
+            // Latch 1 cycle event pulses from Member 2 immediately, decrement on game_tick
             if (strike)
                 shake_timer <= T_SHAKE[3:0];
             else if (game_tick && shake_timer != 4'd0)
@@ -319,7 +310,7 @@ module render_engine (
                      POSE_DMG_FLAP1 = 3'd4,
                      POSE_DMG_FLAP2 = 3'd5,
                      POSE_CRUMPLED  = 3'd6,
-                     POSE_BRAKE     = 3'd7;   // NEW (FIX #12)
+                     POSE_BRAKE     = 3'd7;   
 
     reg [2:0] hero_pose_sel;
     reg       hero_mirror_sel;
@@ -339,16 +330,16 @@ module render_engine (
         end
     end
 
-    // Effective hero frame position during gameplay, S_LANDING, and S_CRASH
-    // REV6: wobble by landing grade - yellow (1) stumbles, red (2) wobbles hard and longer
+    // hero frame position during gameplay, S_LANDING, and S_CRASH
+    // wobble by landing grade - yellow (1) stumbles, red (2) wobbles hard and longer
     wire hard_stumble_on = (game_state == S_LANDING) && (landing_grade != 2'd0) &&
                            (state_timer >= 8'd10) &&
                            (state_timer < ((landing_grade == 2'd2) ? 8'd90 : 8'd45));
     wire signed [8:0] wobble_dx = !hard_stumble_on ? 9'sd0 :
                                   (landing_grade == 2'd2) ? (state_timer[2] ? 9'sd3 : -9'sd3) : 9'sd2;
-    // REV6: the canopy was never opened (crash in freefall) -> never draw a parachute
+    // the canopy was never opened (crash in freefall) -> never draw a parachute
     wire no_chute = (canopy_mode == CM_FREEFALL);
-    // REV8: red-zone flare = death: he lands, wobbles left-right for 1 s, then falls flat
+    // red-zone flare = death: he lands, wobbles left right for 1 s, then falls flat
     wire red_death  = is_crash_impact && (landing_grade == 2'd2);
     wire [7:0] lie_start = red_death ? 8'd60 : 8'd15;
     wire signed [8:0] death_wob = (red_death && state_timer < 8'd60) ?
@@ -365,7 +356,7 @@ module render_engine (
                                      (ground_y_reg[8:0] - 9'sd18)) :
         $signed(hero_y);
 
-    // Settling canopy vertical offset during S_LANDING (rows 0..11 descend into ground)
+    // Settling canopy vertical offset during S_LANDING (rows 0--11 descend into ground)
     wire [4:0] landing_canopy_drop =
         (game_state == S_LANDING) ? ((state_timer < 8'd48) ? state_timer[5:2] : 5'd12) : 5'd0;
 
@@ -388,7 +379,7 @@ module render_engine (
         end else if (game_state == S_LANDING) begin
             hero_pose_sel   = (state_timer < 8'd30) ? POSE_FULL : POSE_CRUMPLED;
             hero_mirror_sel = hard_stumble_on && ((landing_grade == 2'd2) ? state_timer[3] : 1'b1);
-        end else if (stunned) begin                   // REV6: tumbling after a freefall hit
+        end else if (stunned) begin                   // tumbling after a freefall hit
             hero_pose_sel   = POSE_FREEFALL;
             hero_mirror_sel = anim_tick_cnt[2];
             hero_vflip_sel  = anim_tick_cnt[3];
@@ -401,8 +392,8 @@ module render_engine (
             hero_pose_sel = POSE_OPEN_1;
         end else if (game_state == S_CANOPY && state_timer < 8'd40) begin
             hero_pose_sel = POSE_OPEN_2;
-        end else if ((canopy_mode == CM_BRAKING) && (lines_snapped == 2'd0)) begin   // REV6: one line gone keeps the damaged sprite
-            hero_pose_sel = POSE_BRAKE;      // FIX #12: dedicated braking sprite
+        end else if ((canopy_mode == CM_BRAKING) && (lines_snapped == 2'd0)) begin   // one line gone keeps the damaged sprite
+            hero_pose_sel = POSE_BRAKE;      
         end else if (lines_snapped == 2'd1) begin
             hero_pose_sel   = dmg_flap_frame ? POSE_DMG_FLAP2 : POSE_DMG_FLAP1;
             hero_mirror_sel = damaged_side;
@@ -412,7 +403,7 @@ module render_engine (
     end
 
     // -----------------------------------------------------------------
-    // STAGE 1: Per-Pixel Layer & Bounding-Box Resolution
+    // STAGE 1: Per-Pixel Layer & Bounding Box Resolution
     // -----------------------------------------------------------------
 
     // --- Layer 2 & 3: Parallax Clouds (index 3) ---
@@ -436,7 +427,7 @@ module render_engine (
                       (px_clamped >= 7'd7  && px_clamped < 7'd15 && near_y >= 6'd54 && near_y < 6'd56);
     wire s1_in_near_cloud = is_gameplay && (in_near_c1 || in_near_c2 || in_near_c3);
 
-    // --- Layer 4: Ground & Setting-Specific Landing Spot ---
+    // Layer 4: Ground & Setting-Specific Landing Spot
     wire s1_in_ground = is_gameplay && ($signed({10'd0, pixel_y}) >= ground_y_reg);
     wire [5:0] ground_rel_y = s1_in_ground ? (pixel_y - ground_y_reg[5:0]) : 6'd0;
     wire in_spot_x = (px_clamped >= target_x) && (px_clamped < target_x + SPOT_W);
@@ -507,7 +498,7 @@ module render_engine (
         end
     end
 
-    // --- Layer 5: Crates (4 slots, 6x9) ---
+    // - Layer 5: Crates (4 slots, 6x9) -
     integer c;
     reg        s1_in_crate;
     reg [2:0]  s1_crate_col;
@@ -531,7 +522,7 @@ module render_engine (
         end
     end
 
-    // --- Layer 6: Obstacles (6 slots: Bird 8x6, Plane 24x8, Debris 6x6) ---
+    // -- Layer 6: Obstacles (6 slots: Bird 8x6, Plane 24x8, Debris 6x6) --
     integer i;
     reg        s1_in_obs;
     reg [1:0]  s1_obs_type;
@@ -570,8 +561,7 @@ module render_engine (
     end
 
     // --- Layer 7: Hero (16x20 frame, with tumble vflip & landing canopy settle) ---
-    // REV6: canopy rows lean toward the bank (1 px slight, 2 px hard); body rows
-    // swing under the canopy after a gust (swing_dx). Box widened by 3 px each side.
+    // REV6: canopy rows lean toward the bank (1 px slight, 2 px hard); body rows swing under the canopy after a gust (swing_dx). Box widened by 3 px each side.
     wire in_hero_box = is_gameplay &&
                        (px >= hx - 9'sd8) && (px < hx + HERO_FRAME_W + 9'sd8) &&   // REV7: room for the tilt
                        (py >= hy) && (py < hy + HERO_FRAME_H);
@@ -645,7 +635,7 @@ module render_engine (
         end
     endfunction
 
-    // 6 orbiting points selected from the 8-point LUT using anim_tick_cnt[4:2]
+    // 6 orbiting points selected from the 8 point LUT using anim_tick_cnt[4:2]
     wire [2:0] aura_base = anim_tick_cnt[4:2];
     wire in_aura_pt =
         (rel_bx == aura_lut_x(aura_base + 3'd0) && rel_by == aura_lut_y(aura_base + 3'd0)) ||
@@ -656,7 +646,7 @@ module render_engine (
         (rel_bx == aura_lut_x(aura_base + 3'd6) && rel_by == aura_lut_y(aura_base + 3'd6));
     wire fx_magnet_on = is_gameplay && magnet_active && in_aura_pt;
 
-    // Pickup sparkle: expanding 8-ray gold burst around hero body for 10 ticks
+    // Pickup sparkle: expanding 8 ray gold burst around hero body for 10 ticks
     wire signed [8:0] spk_r = $signed({5'd0, (4'd11 - sparkle_timer)});
     wire in_sparkle_pt =
         ((rel_bx ==  spk_r || rel_bx == -spk_r) && (rel_by == 9'sd0 || rel_by == spk_r || rel_by == -spk_r)) ||
@@ -715,7 +705,7 @@ module render_engine (
         lie_c       = lie_px(lie_row[2:0], lie_col[3:0]);
         if (no_chute && (lie_c == 5'd5 || lie_c == 5'd6)) lie_c = 5'd0;   // REV6: no canopy beside him
         s1_fx_color = 5'd0;
-        if (in_lie_box && lie_c != 5'd0) begin   // REV5: hero lying on the ground ("sleeping")
+        if (in_lie_box && lie_c != 5'd0) begin   // hero lying on the ground ("sleeping")
             s1_in_fx    = 1'b1;
             s1_fx_color = lie_c;
         end else if (fx_sparkle_on) begin
@@ -782,7 +772,6 @@ module render_engine (
                 pixel_x == FLARE_LANE_X || pixel_x == (FLARE_LANE_X + 7'd5) ||
                 pixel_y == 6'd4 || pixel_y == 6'd59) begin
                 s1_flare_color = 5'd1; // Black 4x3 marker or 1-px lane outline
-            // FIX #2: bands moved to the wider windows (soft 18..4 m, hard 28..18 / 4..1 m)
             end else if (pixel_y < 6'd34) begin
                 s1_flare_color = 5'd11; // Red zone (> 28 m)
             end else if (pixel_y < 6'd43) begin
@@ -811,7 +800,7 @@ module render_engine (
                             (pixel_y >= warn_y_top) && (pixel_y < warn_y_top + 6'd5);
 
     wire camera_unlocked  = (ground_y_reg > GROUND_LOCK_Y);
-    // REV5: BIG blinking gold arrow (9x9 icon drawn at 2x = 18x18) pointing at the
+    // BIG blinking gold arrow (9x9 icon drawn at 2x = 18x18) pointing at the
     // landing spot for the whole final approach: at the bottom edge until the
     // ground appears, then just above the star on the spot.
     wire [7:0] arrow_x0   = target_x - 8'd1;                     // centred on target_x + 8
@@ -1074,11 +1063,11 @@ module render_engine (
             end
         end
 
-        // -------------------------------------------------------------
+        // -----------------------------------------------------------------
         // 1b. NEW (FIX #14 / #5): blinking gold "PRESS C" at the top centre
         //     - deploy: perfect window 1,550-1,450 m (LED gauge full)
         //     - landing flare: soft (green) window
-        // -------------------------------------------------------------
+        // ---------------------------------------------------------------
         // REV4: moved from the top to the middle of the screen (rows 44-50)
         else if (press_c_on && blink_4hz &&
                  (pixel_y >= 6'd26 && pixel_y < 6'd33) &&
@@ -1218,7 +1207,7 @@ module render_engine (
 
         // -------------------------------------------------------------
         // 3. S_LEVEL_INTRO Screen ("LEVEL n" at double size + setting name)
-        // -------------------------------------------------------------
+        // ----------------------------------------------------------------->
         else if (game_state == S_LEVEL_INTRO) begin
             if (pixel_y >= 6'd14 && pixel_y < 6'd28 && pixel_x >= 7'd7 && pixel_x < 7'd89) begin
                 ty            = (pixel_y - 6'd14) >> 1;
