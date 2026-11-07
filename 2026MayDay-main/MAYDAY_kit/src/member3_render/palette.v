@@ -1,8 +1,7 @@
 // =======================================================================
-// palette.v  --  MEMBER 3 (32-entry RGB565 Colour Palette & Swapper)
-// Translates a 5-bit sprite/layer colour index into 16-bit RGB565.
-// Environment indices (3, 4, 12, 13, 15) swap based on level setting
-// during gameplay; menus always use the Day palette.
+// palette.v - Colour Palette and Swapper - MEMBER 3
+// Translates a 5-bit sprite colour index into 16-bit RGB565.
+// Environment indices (3, 4, 12, 13, 15) swap based on level setting during gameplay.
 // ============================================================================
 module palette (
     input  wire [4:0]  color_idx,
