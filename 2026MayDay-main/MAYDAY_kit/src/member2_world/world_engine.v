@@ -21,8 +21,8 @@
 
 
 // =====================================================================
-// world_engine.v  --  MEMBER 2 (World and collision)
-// STATUS: FINAL PRODUCTION BUILD (CHECKPOINTS 1, 2 & 3 FULLY INTEGRATED)
+// world_engine.v  -- (World and collision) only modifiable by Arun (member 2)
+// STATUS: FINAL PRODUCT: All CHECKPOINTS FULLY INTEGRATED
 // =====================================================================
 module world_engine (
     input  wire               clk,
@@ -40,8 +40,8 @@ module world_engine (
     input  wire [23:0]        altitude,
     input  wire [1:0]         canopy_mode,
     input  wire [1:0]         deploy_grade,
-    input  wire               gust_warn,        // REV3: from Member 1 (level 1 takes turns with wind)
-    input  wire               gust_active,      // REV3
+    input  wire               gust_warn,        
+    input  wire               gust_active,      
     // outputs to Member 3 (flattened: slot n in bits [8n+7:8n])
     output reg  [47:0]        obs_x,
     output reg  [47:0]        obs_y,
@@ -56,14 +56,14 @@ module world_engine (
     output reg                warn_edge,
     output reg  [7:0]         target_x,
     // events
-    output reg                strike,
+    output reg                strike,  // hit hazard or not
     output reg                strike_side,
-    output reg  [1:0]         strike_lines,
+    output reg  [1:0]         strike_lines, // severity
     output reg                crate_collected,
     output reg  [2:0]         crates_level_total,
     output reg                magnet_active,
     output reg  [8:0]         magnet_ticks_left,
-    // REV3 new outputs
+    
     output reg                gust_request,     // level 1: 1-cycle "start a gust now" to Member 1
     output reg                pwarn_active,     // plane warning on a side edge (2 s)
     output reg                pwarn_right,      // 0 = plane comes from the left, 1 = right
@@ -73,11 +73,11 @@ module world_engine (
     `include "game_params.vh"
 
     // -----------------------------------------------------------------
-    // 1. LFSR Engine (16-bit Maximal-length, taps 16, 14, 13, 11)
+    // 1. LFSR Engine (16-bit, we XOR indices 15, 13, 12, 10 of lfsr_reg)
+    //     We prevent lfsr_reg from ever reaching the value of 0
+    //     This should go through a non-repeating cycle of 2^16-1 states
     // -----------------------------------------------------------------
     reg [15:0] lfsr_reg;
-    // FIX #15: the bit indices were missing, so feedback was always 0 and the
-    // LFSR decayed to all-zeros (every "random" value became 0).
     wire lfsr_feedback = lfsr_reg[15] ^ lfsr_reg[13] ^ lfsr_reg[12] ^ lfsr_reg[10];
 
     always @(posedge clk) begin
@@ -89,44 +89,45 @@ module world_engine (
             lfsr_reg <= {lfsr_reg[14:0], lfsr_feedback};
         end
     end
-
-    // FIX #15: value the LFSR is loaded with on level_start. target_x is picked
-    // from THIS (the new seed), not from lfsr_reg, which still holds the old,
-    // all-zero value on the level_start cycle -> spot was always far left.
+    
+    // target_x is picked from seeded_val which has the new value. We don't use the old
+    // value from lfsr_reg
     wire [15:0] seeded_val = ((seed ^ LFSR_CONST_M2) == 16'h0000) ? 16'h0001 : (seed ^ LFSR_CONST_M2);
 
     // -----------------------------------------------------------------
     // 2. Memory Storage Arrays (Obstacles & Crates)
     // -----------------------------------------------------------------
-    reg signed [15:0] slot_x [0:5];
-    reg signed [15:0] slot_y [0:5];
-    reg signed [15:0] slot_vx [0:5];
-    reg signed [15:0] slot_vy_ind [0:5]; 
+    reg signed [15:0] slot_x [0:5];  // These are 6 arrays inside whom, each array holds
+    reg signed [15:0] slot_y [0:5];  // 16 bits. Similar to a 2d array.
+    reg signed [15:0] slot_vx [0:5]; // These slots are for x and y coordinates of threats
+    reg signed [15:0] slot_vy_ind [0:5]; // this is vertical speed deviation
     reg        [1:0]  slot_type [0:5];
     reg               slot_active [0:5];
-    reg               slot_flip [0:5];
+    reg               slot_flip [0:5];  
     reg [5:0] bird_wobble_phase [0:5];
     reg       slot_straight [0:5];
-    reg       plane_flying;          // REV4: any active plane (registered copy for plane_busy)
-    assign plane_busy = pwarn_active | plane_flying;   // REV3: freefall birds fly straight up (no sideways drift)
-    reg [7:0] pwarn_timer;            // REV3: plane warning countdown
-    reg [2:0] pwarn_slot;             // REV3: slot reserved for the warned plane
-    reg [7:0] l1_gap;                 // REV3: level 1 pause between single items
-    reg [2:0] l1_done;                // REV3: level 1 round: [0] bird [1] crate [2] gust shown
+    reg       plane_flying;          // Check for any active plane (registered copy for plane_busy)
+    assign plane_busy = pwarn_active | plane_flying;   
+    reg [7:0] pwarn_timer;            
+    reg [2:0] pwarn_slot;             
+    reg [7:0] l1_gap;                 // level 1 pause between single items
+    reg [2:0] l1_done;                // level 1 round: [0] bird [1] crate [2] gust shown
 
-    reg signed [15:0] cr_x [0:3];
+    reg signed [15:0] cr_x [0:3];     // these are for x and y coordinates of crates
     reg signed [15:0] cr_y [0:3];
-    reg               cr_active [0:3];
-
+    reg               cr_active [0:3]; // denotes active or non-active state of each crate
+                                       // Although level 5 has 5 crates, we optimise this as 4 bits instead of 5
+                                       // cuz cr_active repesents the max number of crates allowed on-screen at the 
+                                       // exact same time
     reg [2:0]  cfg_max_obs;
     reg [15:0] cfg_spawn_interval;
     reg [7:0]  cfg_plane_share;
-    reg [15:0] cfg_plane_gap;      // REV3: ticks between planes (0 = no planes)
+    reg [15:0] cfg_plane_gap;      // ticks between planes (0 = no planes)
     reg [15:0] plane_timer;
     reg [15:0] obstacle_spawn_timer;
     reg [15:0] crate_spawn_timer;
-    reg [15:0] cfg_crate_interval;   // FIX #3: ticks between crates for this level
-    reg [2:0]  crates_spawned;       // FIX #3: stop at crates_level_total
+    reg [15:0] cfg_crate_interval;   // ticks between crates for this level
+    reg [2:0]  crates_spawned;       // stop at crates_level_total
 
     reg [7:0]  warning_timer;
     reg [2:0]  warning_target_slot;
@@ -136,8 +137,12 @@ module world_engine (
     reg [8:0]  magnet_timer;
     reg        magnet_active_reg;
 
-    function signed [7:0] get_sine_wobble;
-        input [3:0] index;
+
+    // These above were for our threshold properties for both scheduling 
+    // and checking limits
+    
+    function signed [7:0] get_sine_wobble; // we're doing this for to simulate a sine wave
+        input [3:0] index;                 // for our birds when not in freefall 
         begin
             case (index)
                 4'd0:  get_sine_wobble = 8'sd0;  4'd1:  get_sine_wobble = 8'sd1;
@@ -154,6 +159,8 @@ module world_engine (
     // -----------------------------------------------------------------
     // 3. Bus Flattening Layout Control (Combinational)
     // -----------------------------------------------------------------
+    // We do this becaue we cannot pass 2d arrays as they are. We have to flatten them into 
+    // 1d arrays
     integer s;
     always @(*) begin
         // Link internal magnet registers straight onto output system indicators
@@ -176,7 +183,7 @@ module world_engine (
     end
 
     // -----------------------------------------------------------------
-    // 4. Collision Detection Matrix (Dual-Hitbox Box Overlap)
+    // 4. Collision Detection Matrix
     // -----------------------------------------------------------------
     reg        slot_hit [0:5];
     reg        crate_hit [0:3];
@@ -184,16 +191,16 @@ module world_engine (
     reg signed [7:0] body_hb_left, body_hb_right, body_hb_top, body_hb_bottom;
     
     always @(*) begin
-        if (canopy_mode == CM_FREEFALL) begin
-            hero_hb_left   = hero_x + HB_FF_X;
+        if (canopy_mode == CM_FREEFALL) begin  // basicslly in freefall, both hero and 
+            hero_hb_left   = hero_x + HB_FF_X; // parachute are one
             hero_hb_right  = hero_x + HB_FF_X + HB_FF_W - 1;
             hero_hb_top    = hero_y + HB_FF_Y;
             hero_hb_bottom = hero_y + HB_FF_Y + HB_FF_H - 1;
             body_hb_left   = hero_hb_left;   body_hb_right  = hero_hb_right;
             body_hb_top    = hero_hb_top;    body_hb_bottom = hero_hb_bottom;
-        end else begin
-            hero_hb_left   = hero_x + HB_CANOPY_X;
-            hero_hb_right  = hero_x + HB_CANOPY_X + HB_CANOPY_W - 1;
+        end else begin                        // after deploying parachute, we split into
+            hero_hb_left   = hero_x + HB_CANOPY_X; // 2 distinct boundaries: parachute above
+            hero_hb_right  = hero_x + HB_CANOPY_X + HB_CANOPY_W - 1; // and player's body below
             hero_hb_top    = hero_y + HB_CANOPY_Y;
             hero_hb_bottom = hero_y + HB_CANOPY_Y + HB_CANOPY_H - 1;
             body_hb_left   = hero_x + HB_BODY_X;
@@ -205,6 +212,8 @@ module world_engine (
 
     integer c;
     reg signed [7:0] obs_hb_left, obs_hb_right, obs_hb_top, obs_hb_bottom;
+    // here we loop and check for active threats from our obstacles. Based on the threat
+    // we give the obstacle its bounding sizes
     always @(*) begin
         for (c = 0; c < 6; c = c + 1) begin
             slot_hit[c] = 1'b0;
@@ -233,7 +242,7 @@ module world_engine (
                         obs_hb_top    = 8'sd0; obs_hb_bottom = 8'sd0;
                     end
                 endcase
-
+               // below we check if there is an overlap and if so, there is definitely a hit
                 if (canopy_mode == CM_FREEFALL) begin
                     if (!(obs_hb_left > hero_hb_right || obs_hb_right < hero_hb_left ||
                           obs_hb_top > hero_hb_bottom || obs_hb_bottom < hero_hb_top)) begin
@@ -250,7 +259,7 @@ module world_engine (
             end
         end
     end
-
+    // we repeat the same for our crates
     integer cr_idx;
     reg signed [7:0] crate_hb_left, crate_hb_right, crate_hb_top, crate_hb_bottom;
     always @(*) begin
@@ -279,7 +288,7 @@ module world_engine (
            end
         end 
         // -----------------------------------------------------------------
-        // 5. Sequential Logic Update Loop (All Features Complete)
+        // 5. Sequential Logic Update Loop
         // -----------------------------------------------------------------
         integer i;
         reg [2:0] hit_count;
@@ -291,11 +300,11 @@ module world_engine (
         reg [1:0] empty_crate_idx;
         reg       window_bird_present;
         reg signed [15:0] rand_offset_x;
-        // REV3 spawner temporaries
+
         reg plane_on, any_crate, world_clear, band_bot_used, band_bot_left, band_top_used, band_top_left;
         reg bot_ok, spawning, in_ff, spawn_crate;
-        reg dbr_used, dbr_left, mb_left, mb_right, debris_ok;   // REV3 cross-direction safe side
-        reg calm_zone;   // REV8
+        reg dbr_used, dbr_left, mb_left, mb_right, debris_ok;   
+        reg calm_zone;   
         reg [7:0] rand_any_x, rand_left_x, rand_rite_x, bot_x, top_x;
         reg [2:0] l1_avail;  reg [1:0] l1_pick;  reg crate_alt_ok;
         initial spawn_crate = 1'b0;
@@ -306,8 +315,8 @@ module world_engine (
         reg [7:0] abs_dx, abs_dy;
         reg [8:0] manhattan_dist;
         always @(posedge clk) begin
-           if (rst || level_start) begin
-              strike               <= 1'b0;
+           if (rst || level_start) begin    // basically clear everything when we reset or
+              strike               <= 1'b0; // start a level
               strike_side          <= 1'b0;
               strike_lines         <= 2'd0;
               crate_collected      <= 1'b0;
@@ -331,7 +340,7 @@ module world_engine (
               pwarn_slot           <= 3'd0;
               l1_gap               <= 8'd0;
               l1_done              <= 3'd0;
-              for (i = 0; i < 6; i = i + 1) begin
+              for (i = 0; i < 6; i = i + 1) begin //doing the same for the objects
                  slot_x[i]            <= 16'sd0;
                  slot_y[i]            <= 16'sd0;
                  slot_vx[i]           <= 16'sd0;
@@ -347,12 +356,13 @@ module world_engine (
                  cr_y[i]              <= 16'sd0;
                  cr_active[i]         <= 1'b0;
               end
-              if (level_start) begin
-                 target_x <= TARGET_X_MIN + ((seeded_val[7:0] ^ seeded_val[15:8]) % (TARGET_X_MAX - TARGET_X_MIN + 1)); // FIX #15 (mix both seed bytes)
-                 // REV3 difficulty table (easier; level 5 = old level 3 + planes)
-                 //        crates  max-on-screen  spawn-gap  plane-share  crate-gap
+              // Below, we basically we adjust difficulty , spawn window and max obstacles 
+              // based on level chosen
+              if (level_start) begin 
+                 target_x <= TARGET_X_MIN + ((seeded_val[7:0] ^ seeded_val[15:8]) % (TARGET_X_MAX - TARGET_X_MIN + 1)); 
+                 //  crates  max-on-screen  spawn-gap  plane-share  crate-gap
                  case (level)
-                 3'd1: begin   // tutorial: one thing at a time (see L1 sequencer)
+                 3'd1: begin   // tutorial: one thing at a time. Here both crate and spawn interval are zero so that we can pass them one at a time manually for tutorial purposes
                     crates_level_total <= 3'd3; cfg_max_obs <= 3'd1;
                     cfg_spawn_interval <= 16'd0;   cfg_plane_share <= 8'd0;  cfg_crate_interval <= 16'd0;   cfg_plane_gap <= 16'd0;
                  end
@@ -368,7 +378,7 @@ module world_engine (
                     crates_level_total <= 3'd4; cfg_max_obs <= 3'd3;
                     cfg_spawn_interval <= 16'd108; cfg_plane_share <= 8'd26; cfg_crate_interval <= 16'd380; cfg_plane_gap <= 16'd720;  // plane every ~12 s
                  end
-                 default: begin // level 5: everything, still beatable (planes 15%)
+                 default: begin // level 5: everything, modified to be beatable but difficult (planes 15%)
                     crates_level_total <= 3'd5; cfg_max_obs <= 3'd3;
                     cfg_spawn_interval <= 16'd96;  cfg_plane_share <= 8'd38; cfg_crate_interval <= 16'd300; cfg_plane_gap <= 16'd540;  // plane every ~9 s
                  end
@@ -377,13 +387,13 @@ module world_engine (
            end else begin 
               strike          <= 1'b0;
               crate_collected <= 1'b0;
-              // Trigger structural countdown checking sequence for perfect deployments
+              // We check for perfect deployment so as to activate magnetic field around hero
               if (game_state == S_CANOPY && deploy_grade == DG_PERFECT && !magnet_active_reg && (magnet_timer == 0) && (altitude > (ALT_FINAL << 8))) begin
                  magnet_active_reg <= 1'b1;
                  magnet_timer      <= 9'd300; // Initialize 5 second lock
               end
               if (game_tick) begin
-                 // Handle active magnet expiration timing
+                 // Magnet expiration timing on every active game tick
                  if (magnet_active_reg) begin
                     if (magnet_timer == 9'd1) begin
                        magnet_active_reg <= 1'b0;
@@ -394,8 +404,8 @@ module world_engine (
                  end 
                  for (i = 0; i < 4; i = i + 1) begin
                     if (cr_active[i] && crate_hit[i]) begin
-                       crate_collected <= 1'b1;
-                       cr_active[i]    <= 1'b0;
+                       crate_collected <= 1'b1; // updating that crate has been collected
+                       cr_active[i]    <= 1'b0; // resetting flag once collected crate
                     end
                  end
                  hit_count     = 3'd0;
@@ -408,18 +418,24 @@ module world_engine (
                  end
                 if (hit_count > 0) begin
                    strike <= 1'b1;
-                   // REV6 FIX: signed compare (slot_x[..][15:8] alone is UNSIGNED) and the
-                   // real centre of each obstacle (bird 8 px -> +4, plane 24 -> +12, debris 6 -> +3)
+                   // Physics collision engine:
+                   // We use $sgined to find the spatial offsets to find centre point of specific objects
+                   // we set strike_side to track the point of impact
+                   // also we apply double penalty for plane obstacle
+                   
                    strike_side <= (($signed(slot_x[first_hit_idx][15:8]) +
                                     ((slot_type[first_hit_idx] == OBS_PLANE)  ? 10'sd12 :
                                      (slot_type[first_hit_idx] == OBS_DEBRIS) ? 10'sd3  : 10'sd4))
-                                   < ($signed(hero_x) + 10'sd8)) ? 1'b0 : 1'b1;
+                                   < ($signed(hero_x) + 10'sd8)) ? 1'b0 : 1'b1; // to see from where damage came from
                    if (hit_count == 3'd1) begin
                       strike_lines <= (slot_type[first_hit_idx] == OBS_PLANE) ? 2'd2 : 2'd1;
                    end else begin
-                      strike_lines <= 2'd2;
+                      strike_lines <= 2'd2;  // damage basically. If damage is 2 hero falls down
                    end
                 end
+                // This is our warning system
+                // We update our warning system based on time
+                // If we reach safe zone, we shut down alerts
                 if (warning_pending) begin
                    if (warning_timer == 8'd1) begin
                       warning_pending                  <= 1'b0;
@@ -431,13 +447,13 @@ module world_engine (
                    end
                 end
                 gust_request <= 1'b0;
-                calm_zone = (game_state == S_FINAL_APPROACH) && (altitude[23:8] < CALM_ALT);   // REV8
+                calm_zone = (game_state == S_FINAL_APPROACH) && (altitude[23:8] < CALM_ALT);   
                 if (calm_zone) begin warn_active <= 1'b0; warning_pending <= 1'b0; end
                 // =========================================================
-                // REV3 SPAWNER. Who is on screen, and which "bands" are taken.
-                // A band = the 24 px strip where new objects enter: bottom
-                // (birds) or top (debris). Objects in the same band reach the
-                // hero at about the same time, so the fairness rules use it.
+                // We loop through active threat indices before generating elements
+                // to calculate exact density layouts across screen zones.
+                // We identify layout conditions to verify the environment is clear
+                // before spawning new objects
                 // =========================================================
                 active_obs_count = 3'd0;  plane_on = 1'b0;  any_crate = 1'b0;
                 band_bot_used = 1'b0; band_bot_left = 1'b0; band_top_used = 1'b0; band_top_left = 1'b0;
@@ -464,10 +480,12 @@ module world_engine (
                 end
                 for (i = 0; i < 4; i = i + 1) if (cr_active[i]) any_crate = 1'b1;
                 plane_flying <= plane_on;
-                crate_alt_ok = (altitude[23:8] >= CRATE_LAST_ALT);   // REV4
+                crate_alt_ok = (altitude[23:8] >= CRATE_LAST_ALT); 
                 world_clear = (active_obs_count == 3'd0) && !any_crate && !warning_pending &&
                               !pwarn_active && !gust_warn && !gust_active;
-
+    
+                // Below, we scan the local registers to find if we have available
+                // array indices for both incoming hazards and crates
                 found_empty_slot = 1'b0;
                 empty_slot_idx   = 3'd0;
                 for (i = 0; i < 6; i = i + 1) begin
@@ -485,7 +503,13 @@ module world_engine (
                       empty_crate_idx   = i[1:0];
                    end
                 end
-
+                // =========================================================
+                // We use our earlier LFSR to map random coordinates across specific
+                // segments of the screen. We do this for fairness even in randomisation:
+                // It forces the objects, if coming one after the other, to align along 
+                // identical side tracks, preventing unavoidable vertical traps and blocks
+                // =========================================================
+                
                 // Random x anywhere, or forced onto one half ("safe side" rule, levels 3-5).
                 rand_any_x  = 8'd10 + (lfsr_reg[7:0] % 70);           // 10..79
                 rand_left_x = 8'd10 + (lfsr_reg[7:0] % 28);           // 10..37
@@ -502,7 +526,7 @@ module world_engine (
                 // Levels 1-2: never two birds in the same band (only one near the hero at a time).
                 bot_ok = (level >= 3'd3) || !band_bot_used;
 
-                // ---- plane warning countdown: spawn the plane when it ends ----
+                // plane warning countdown: spawn the plane when it ends
                 if (pwarn_active) begin
                    if (pwarn_timer <= 8'd1) begin
                       pwarn_active                <= 1'b0;
@@ -520,14 +544,14 @@ module world_engine (
                    end else
                       pwarn_timer <= pwarn_timer - 8'd1;
                 end
-
+                // These are conditional flags to authorise threat generation
                 spawning = (game_state >= S_FREEFALL_LOCKED && game_state <= S_FINAL_APPROACH) && (scroll_vy > 0) &&
-                           (altitude[23:8] >= OBS_LAST_ALT);   // REV8: nothing new below 120 m
+                           (altitude[23:8] >= OBS_LAST_ALT);   // Nothing new below 120 m
                 in_ff    = (game_state == S_FREEFALL_LOCKED || game_state == S_FREEFALL_WINDOW);
 
                 if (spawning && in_ff) begin
-                   // ---- FREEFALL: birds only, 1 s warning, fly STRAIGHT up.
-                   //      Levels 1-2: one at a time. Levels 3-5: up to 2.
+                   // During FREEFALL: birds only, 1 s warning, fly STRAIGHT up.
+                   // Levels 1-2: one at a time. Levels 3-5: up to 2.
                    obstacle_spawn_timer <= obstacle_spawn_timer + 1;
                    if ((obstacle_spawn_timer >= 16'd60) && found_empty_slot && !warning_pending && bot_ok &&
                        (active_obs_count < ((level >= 3'd3) ? 3'd2 : 3'd1))) begin
@@ -543,19 +567,18 @@ module world_engine (
                       slot_vx[empty_slot_idx]           <= 16'sd0;
                       slot_vy_ind[empty_slot_idx]       <= 16'sd0;
                       slot_flip[empty_slot_idx]         <= lfsr_reg[8];
-                      slot_straight[empty_slot_idx]     <= 1'b1;   // REV3: straight up
+                      slot_straight[empty_slot_idx]     <= 1'b1;   
                       bird_wobble_phase[empty_slot_idx] <= 6'd0;
                       obstacle_spawn_timer              <= 16'd0;
                    end
                 end else if (spawning && level == 3'd1) begin
-                   // ---- LEVEL 1 TUTORIAL: exactly ONE thing at a time (bird, crate
-                   //      or gust), random order, each shown once per round.
+                   // LEVEL 1 TUTORIAL: exactly ONE thing at a time (bird, crate
+                   //          or gust), random order, each shown once per round.
                    l1_gap <= world_clear ? ((l1_gap == 8'd255) ? l1_gap : l1_gap + 8'd1) : 8'd0;
                    if (world_clear && (l1_gap >= L1_GAP_TICKS)) begin
                       l1_gap <= 8'd0;
                       l1_avail = ~l1_done & {1'b1, (crates_spawned < crates_level_total) && crate_alt_ok, 1'b1};
                       if (l1_avail == 3'd0) l1_avail = {1'b1, (crates_spawned < crates_level_total) && crate_alt_ok, 1'b1};
-                      // REV4: running out of height with crates left -> give a crate next
                       if ((crates_spawned < crates_level_total) && crate_alt_ok && (altitude[23:8] < 16'd450))
                          l1_avail = 3'b010;
                       // random start, then first available
@@ -586,14 +609,14 @@ module world_engine (
                       end
                    end
                 end else if (spawning) begin
-                   // ---- LEVELS 2-5 canopy spawner ----
+                   // LEVELS 2-5 canopy spawner
                    obstacle_spawn_timer <= obstacle_spawn_timer + 1;
                    // planes run on their own timer (levels 4-5); when due, wait until at
                    // most 1 other obstacle is on screen, then give the 2 s side warning
                    if (cfg_plane_gap != 16'd0 && !plane_on && !pwarn_active && plane_timer < cfg_plane_gap)
                       plane_timer <= plane_timer + 1;
                    if ((cfg_plane_gap != 16'd0) && (plane_timer >= cfg_plane_gap) && !plane_on && !pwarn_active &&
-                       (altitude[23:8] >= PLANE_LAST_ALT) &&   // REV8: no planes below 300 m
+                       (altitude[23:8] >= PLANE_LAST_ALT) &&   // Basically no planes below 300 m
                        found_empty_slot && !warning_pending && (active_obs_count <= 3'd1)) begin
                       plane_timer  <= 16'd0;
                       begin
@@ -602,11 +625,11 @@ module world_engine (
                          pwarn_active <= 1'b1;
                          pwarn_timer  <= PLANE_WARN_TICKS;
                          pwarn_slot   <= empty_slot_idx;
-                         pwarn_right  <= lfsr_reg[9];
-                         pwarn_y      <= PLANE_Y;   // REV3: level with the hero's body; tug UP to clear it
+                         pwarn_right  <= lfsr_reg[9]; // Plane is level with the hero's body. 
+                         pwarn_y      <= PLANE_Y;     // tug UP to clear it
                       end
-                   // REV4: when a plane is due, hold back new obstacles so the screen
-                   // thins out and the plane always gets its turn (busy level 5 could
+                   // When a plane is due, hold back new obstacles so the screen
+                   // thins out and the plane always gets its turn (level 5 could
                    // otherwise go a whole level without one)
                    end else if ((obstacle_spawn_timer >= cfg_spawn_interval) && (active_obs_count < cfg_max_obs) &&
                        found_empty_slot && !warning_pending && !pwarn_active && !plane_on &&
@@ -641,17 +664,18 @@ module world_engine (
                       end
                    end
                    // crates on their own timer (levels 2-5)
+                   // to deploy crates at structured markers
                    if (game_state == S_CANOPY) begin
                       crate_spawn_timer <= crate_spawn_timer + 1;
                       if ((crate_spawn_timer >= cfg_crate_interval) && found_empty_crate &&
-                          (crates_spawned < crates_level_total) && crate_alt_ok) begin   // REV4: >= 150 m above ground
+                          (crates_spawned < crates_level_total) && crate_alt_ok) begin   // >= 150 m above ground
                          crate_spawn_timer <= 16'd0;
                          spawn_crate = 1'b1;
                       end
                    end
                 end
 
-                // ---- shared crate spawn (green medic crate) ----
+                // shared crate spawn (green medic crate)
                 if (spawn_crate) begin
                    crates_spawned             <= crates_spawned + 3'd1;
                    cr_active[empty_crate_idx] <= 1'b1;
@@ -665,39 +689,36 @@ module world_engine (
                       cr_x[empty_crate_idx] <= ($signed(hero_x) + rand_offset_x) <<< 8;
                 end
                 spawn_crate = 1'b0;
-                // F. Global Kinematics Engine Transformations
+                // Global Kinematics Engine Transformations
                 for (i = 0; i < 6; i = i + 1) begin
                    if (slot_active[i]) begin
                       if (calm_zone) begin
-                         slot_active[i] <= 1'b0;                 // REV8: last 50 m is clear
+                         slot_active[i] <= 1'b0;                 // Last 50 m is clear
                       end else if (slot_hit[i] && (!warning_pending || warning_target_slot != i[2:0])) begin
                          slot_active[i] <= 1'b0;
                       end else begin
-                         // REV7: during a crash everything flies up and away (no longer 'falls with him')
+                         // During a crash everything flies up and away and not with hero
                          slot_y[i] <= slot_y[i] + slot_vy_ind[i] - ((game_state == S_CRASH) ? 16'sd768 : scroll_vy);
                          slot_x[i] <= slot_x[i] + slot_vx[i];
                          case (slot_type[i])
                          OBS_BIRD: begin
                             bird_wobble_phase[i] <= (bird_wobble_phase[i] == 6'd11) ? 6'd0 : bird_wobble_phase[i] + 1;
                             if (slot_straight[i]) begin
-                               slot_x[i] <= slot_x[i];        // REV3: freefall birds fly straight up
-                            end else if (slot_flip[i]) begin
+                               slot_x[i] <= slot_x[i];        // Freefall birds fly straight up
+                            end else if (slot_flip[i]) begin  // Non-freefall have wobbly diagonal movement
                                slot_x[i] <= slot_x[i] - BIRD_VX + (get_sine_wobble(bird_wobble_phase[i][3:0]) <<< 5);
                             end else begin
                                slot_x[i] <= slot_x[i] + BIRD_VX + (get_sine_wobble(bird_wobble_phase[i][3:0]) <<< 5);
                             end
                          end
                          OBS_PLANE: begin
-                            slot_y[i] <= slot_y[i];   // REV3: planes fly level (no scroll) at PLANE_Y
+                            slot_y[i] <= slot_y[i];   // Planes fly at a constant level
                          end
                          default: begin 
-                            // Linear updates handled above
                          end
                          endcase
-                         // FIX #3/#4/#6/#8 (ROOT CAUSE): a part-select like slot_y[i][15:8] is
-                         // UNSIGNED in Verilog, so "< -20" compared against a huge number and
-                         // was ALWAYS true -> every bird/plane/debris was deleted on its first
-                         // tick (the warning showed, then nothing came). Use $signed().
+                         // We perform garbage collection where using signed type casting, we
+                         // safely deactivate slots of objects when they drift off screen to reuse
                          if (($signed(slot_y[i][15:8]) < -20) || ($signed(slot_y[i][15:8]) > 80) ||
                              ($signed(slot_x[i][15:8]) < -40) || ($signed(slot_x[i][15:8]) > 120)) begin
                             slot_active[i] <= 1'b0;
@@ -705,7 +726,9 @@ module world_engine (
                       end
                    end
                 end
-                // G. Checkpoint 3 Crate Vector Processing Matrix (Standard Motion vs Proximity Magnet Pull)
+                // Magnetic proximity: Basically check distance measurements using 
+                // geometric centre coordinates. Done using Manhattan distance (|dx|+|dy|)
+                // instead of square root calculations as they have very high overload
                 target_center_x = hero_x + HB_BODY_X + (HB_BODY_W / 2);
                 target_center_y = hero_y + HB_BODY_Y + (HB_BODY_H / 2);
                 for (i = 0; i < 4; i = i + 1) begin
@@ -723,7 +746,7 @@ module world_engine (
                         // Apply attraction vectors based on distance thresholds
                         if (manhattan_dist > 32) begin
                            // Outside pull threshold, apply standard vertical scroll velocity
-                           cr_y[i] <= cr_y[i] + CRATE_FALL - ((game_state == S_CRASH) ? 16'sd768 : scroll_vy);   // REV8: crates fly up during a crash  // FIX #3: crates fall slower than hero (ICD: up by scroll_vy - CRATE_FALL)
+                           cr_y[i] <= cr_y[i] + CRATE_FALL - ((game_state == S_CRASH) ? 16'sd768 : scroll_vy);     
                         end else if (manhattan_dist >= 16) begin
                            // Medium Range Proximity Zone: pull smoothly at 0.25 px/tick
                            cr_x[i] <= (dx < 0) ? cr_x[i] - MAGNET_FAR : cr_x[i] + MAGNET_FAR;
@@ -734,12 +757,13 @@ module world_engine (
                            cr_y[i] <= ((dy < 0) ? cr_y[i] - MAGNET_NEAR : cr_y[i] + MAGNET_NEAR) - scroll_vy;
                         end
                      end else begin
-                        // Magnet inactive, apply standard cargo scroll translation
-                        cr_y[i] <= cr_y[i] + CRATE_FALL - scroll_vy;  // FIX #3: crates fall slower than hero (ICD: up by scroll_vy - CRATE_FALL)
+                        // Magnet inactive, apply standard scroll translation
+                        cr_y[i] <= cr_y[i] + CRATE_FALL - scroll_vy;  
                      end
+                     // Garbage collection once again: 
                      // Clear active registers if crates escape upper bounds
                      if ($signed(cr_y[i][15:8]) < -16 || $signed(cr_y[i][15:8]) > 80 ||
-                          ((game_state == S_FINAL_APPROACH) && (altitude[23:8] < CALM_ALT))) begin  // FIX #3 + REV8 calm zone
+                          ((game_state == S_FINAL_APPROACH) && (altitude[23:8] < CALM_ALT))) begin  
                         cr_active[i] <= 1'b0;
                      end
                   end
