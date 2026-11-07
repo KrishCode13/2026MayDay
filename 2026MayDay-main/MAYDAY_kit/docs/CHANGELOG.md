@@ -1,5 +1,16 @@
 # MAYDAY changelog
 
+## Revision 9 (latest)
+
+| Item | Change | File |
+|---|---|---|
+| "PRESS C" showed while the lock was still on screen | The open-lock icon flashes for the first 24 ticks of the deploy window; PRESS C and the deploy button now both wait until it is gone (T_UNLOCK_ANIM) | render_engine.v, game_director.v, game_params.vh |
+
+**Verified:** PRESS C is off while any lock icon is shown and turns on at tick 24, the same tick the lock disappears.
+
+---
+
+
 ## Revision 8 (latest)
 
 | Item | Change | File |

@@ -800,7 +800,7 @@ module render_engine (
     // 3. HUD & Menu Icons via shared sprite_rom icon port
     wire lock_closed_on = (game_state == S_FREEFALL_LOCKED);
     wire lock_open_on   = (game_state == S_FREEFALL_WINDOW) &&
-                          (state_timer < 8'd24) && (state_timer[2] == 1'b0);
+                          (state_timer < T_UNLOCK_ANIM) && (state_timer[2] == 1'b0);
     wire in_lock_box    = (lock_closed_on || lock_open_on) &&
                           (pixel_x >= 7'd4 && pixel_x < 7'd9) &&
                           (pixel_y >= 6'd2 && pixel_y < 6'd8);
@@ -1020,7 +1020,8 @@ module render_engine (
 
     // FIX #14 / #5: when to show the "PRESS C" prompt
     // REV6: shown for the WHOLE deploy window, from the moment the lock disappears
-    wire press_c_on = (game_state == S_FREEFALL_WINDOW) ||
+    // REV9: only once the lock icon has gone - exactly when C starts to work
+    wire press_c_on = ((game_state == S_FREEFALL_WINDOW) && (state_timer >= T_UNLOCK_ANIM)) ||
                       ((game_state == S_FINAL_APPROACH) &&
                        (alt_metres <= FLARE_SOFT_HI) && (alt_metres >= FLARE_SOFT_LO));
 
