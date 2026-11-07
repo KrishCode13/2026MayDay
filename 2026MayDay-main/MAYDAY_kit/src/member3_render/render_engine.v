@@ -108,7 +108,7 @@ module render_engine (
                                 18'sd44;
 
     wire signed [17:0] ground_y_next =
-        (is_crash_plunge && !is_crash_short) ? plunge_ground_y :   // REV7: short fall keeps the real ground
+        (is_crash_plunge && !is_crash_short) ? plunge_ground_y :   // short fall keeps the real ground
         (is_crash_impact || game_state == S_LANDING) ? 18'sd54 :
         ($signed(hero_y) + 18'sd20 + $signed({2'b00, alt_metres}));
 
@@ -123,7 +123,7 @@ module render_engine (
     wire blink_4hz      = ~anim_tick_cnt[3]; // ~4 Hz flash (8 ticks on, 8 ticks off)
 
     // -----------------------------------------------------------------
-    // REV3: guidance text + crate star pop-up
+    //   guidance text + crate star pop-up
     //   msg_id: 1 AVOID BIRDS  2 GRAB CRATES  3 WIND! STEER  4 PRESS C AT GREEN 5 STRONGER WIND  6 DEBRIS ABOVE!  7 PLANES! TUG UP 8 FINAL DESCENT  9 REPAIRED!
     //   Level 1 shows a message every time a bird/crate/gust appears (tutorial).
     //   Levels 2-5 show one message only when that level's new element first appears.
@@ -348,9 +348,9 @@ module render_engine (
     wire signed [8:0] hx = $signed(hero_x) + crash_spin_dx + wobble_dx + death_wob;
     wire signed [8:0] hy =
         (game_state == S_LANDING) ? (ground_y_reg[8:0] - 9'sd20) :
-        is_crash_impact           ? ((state_timer >= lie_start) ? -9'sd64 : (ground_y_reg[8:0] - 9'sd18)) :   // REV5/8: hidden once lying
-        (plunge_down && no_chute) ? -9'sd64 :   // REV6: body drawn lying instead
-        is_crash_short            ? (short_landed ? short_land_y[8:0] : short_fall_y[8:0]) :   // REV7
+        is_crash_impact           ? ((state_timer >= lie_start) ? -9'sd64 : (ground_y_reg[8:0] - 9'sd18)) :   // hidden once lying
+        (plunge_down && no_chute) ? -9'sd64 :   // body drawn lying instead
+        is_crash_short            ? (short_landed ? short_land_y[8:0] : short_fall_y[8:0]) :  
         is_crash_plunge           ? ((state_timer < 8'd90) ?
                                      (9'sd10 + $signed({3'b000, state_timer[6:2]})) :
                                      (ground_y_reg[8:0] - 9'sd18)) :
@@ -367,7 +367,7 @@ module render_engine (
         if (game_state == S_CRASH) begin
             if (plunge_air) begin
                 // Tumbling plunge: alternate freefall & crumpled, flipping H and V
-                hero_pose_sel   = no_chute ? POSE_FREEFALL :   // REV6: no parachute if never deployed
+                hero_pose_sel   = no_chute ? POSE_FREEFALL :   // no parachute if never deployed
                                   (state_timer[3] ? POSE_CRUMPLED : POSE_FREEFALL);
                 hero_mirror_sel = state_timer[2];
                 hero_vflip_sel  = state_timer[3];
@@ -561,9 +561,9 @@ module render_engine (
     end
 
     // --- Layer 7: Hero (16x20 frame, with tumble vflip & landing canopy settle) ---
-    // REV6: canopy rows lean toward the bank (1 px slight, 2 px hard); body rows swing under the canopy after a gust (swing_dx). Box widened by 3 px each side.
+    // canopy rows lean toward the bank (1 px slight, 2 px hard); body rows swing under the canopy after a gust (swing_dx). Box widened by 3 px each side.
     wire in_hero_box = is_gameplay &&
-                       (px >= hx - 9'sd8) && (px < hx + HERO_FRAME_W + 9'sd8) &&   // REV7: room for the tilt
+                       (px >= hx - 9'sd8) && (px < hx + HERO_FRAME_W + 9'sd8) &&   // room for the tilt
                        (py >= hy) && (py < hy + HERO_FRAME_H);
     wire        flying_canopy = (game_state == S_CANOPY || game_state == S_FINAL_APPROACH) &&
                                 (canopy_mode != CM_FREEFALL);
@@ -576,7 +576,7 @@ module render_engine (
                               ((raw_hero_row < 5'd12) &&
                                ((state_timer >= 8'd48) || (raw_hero_row < landing_canopy_drop)));
 
-    // REV7: pendulum TILT. The canopy stays put (pivot), every row below is shifted a
+    // pendulum TILT. The canopy stays put (pivot), every row below is shifted a
     // little more than the one above (at most 1 px between rows), so the lines, the
     // hands and the body always stay connected. Banking right swings the body left
     // (outward); a gust adds the swing_dx offset at the feet.
@@ -676,7 +676,7 @@ module render_engine (
         ((game_state == S_LANDING) && landing_grade && (state_timer >= 8'd4 && state_timer < 8'd44) && in_dust_puff) ||
         ((plunge_down || is_crash_impact) && in_dust_puff);
 
-    // REV5: hero lying flat after a crash landing (16x5), crumpled canopy beside him
+    // hero lying flat after a crash landing (16x5), crumpled canopy beside him
     function [4:0] lie_px; input [2:0] r; input [3:0] c;
         reg [79:0] row;
         begin
@@ -695,7 +695,7 @@ module render_engine (
     wire signed [9:0] lie_col = $signed({3'd0, pixel_x}) - lie_x0;
     wire signed [9:0] lie_row = $signed({4'd0, pixel_y}) - lie_y0;
     wire in_lie_box = ((is_crash_impact && (state_timer >= lie_start)) ||
-                       (plunge_down && no_chute)) &&   // REV6/7
+                       (plunge_down && no_chute)) &&  
                       (lie_col >= 10'sd0) && (lie_col < 10'sd16) && (lie_row >= 10'sd0) && (lie_row < 10'sd4);
     reg  [4:0] lie_c;
     reg       s1_in_fx;
@@ -703,7 +703,7 @@ module render_engine (
     always @* begin
         s1_in_fx    = 1'b0;
         lie_c       = lie_px(lie_row[2:0], lie_col[3:0]);
-        if (no_chute && (lie_c == 5'd5 || lie_c == 5'd6)) lie_c = 5'd0;   // REV6: no canopy beside him
+        if (no_chute && (lie_c == 5'd5 || lie_c == 5'd6)) lie_c = 5'd0;   // no canopy beside him
         s1_fx_color = 5'd0;
         if (in_lie_box && lie_c != 5'd0) begin   // hero lying on the ground ("sleeping")
             s1_in_fx    = 1'b1;
@@ -719,7 +719,7 @@ module render_engine (
             s1_fx_color = (game_state == S_CRASH) ? 5'd5 : 5'd3; // Orange/grey puff
         end else if (fx_wind_on) begin
             s1_in_fx    = 1'b1;
-            // REV4: grey wind on the light-blue day levels (cyan was invisible there)
+            // grey wind on the light-blue day levels (cyan was invisible there)
             s1_fx_color = (level == 3'd1 || level == 3'd3) ? 5'd4 : 5'd14;
         end
     end
@@ -745,7 +745,7 @@ module render_engine (
     //    Bottom half (y = 32..58, 27 px) maps 30 m -> 0 m using shifts:
     //      offset = (30 - alt) - ((30 - alt) >> 3)           [maps 30 m span to 27 px]
     wire [7:0] alt_clamped_150 = (alt_metres > 16'd150) ? 8'd150 : alt_metres[7:0];
-    // REV5: once C is pressed the marker FREEZES at the press height, so the
+    // once C is pressed the marker FREEZES at the press height, so the
     // player sees which zone they hit (red = crash, yellow = hard, green = soft)
     reg  [7:0] flare_alt_l = 8'd150;
     always @(posedge clk) if (!flare_locked) flare_alt_l <= alt_clamped_150;
@@ -820,13 +820,13 @@ module render_engine (
                         ($signed({12'd0, pixel_y}) <  spot_star_y0 + 18'sd9);
     wire [17:0] spot_star_row = $signed({12'd0, pixel_y}) - spot_star_y0;
 
-    // REV3: plane warning triangle, flashing on the left (x=4) or right (x=87) edge
+    // plane warning triangle, flashing on the left (x=4) or right (x=87) edge
     wire [6:0] pwarn_x0 = pwarn_right ? 7'd87 : 7'd4;
     wire [5:0] pwarn_y0 = (pwarn_y < 8'sd0) ? 6'd0 : (pwarn_y > 8'sd58) ? 6'd58 : pwarn_y[5:0];
     wire in_pwarn_box = is_gameplay && pwarn_active && blink_4hz &&
                         (pixel_x >= pwarn_x0) && (pixel_x < pwarn_x0 + 7'd5) &&
                         (pixel_y >= pwarn_y0) && (pixel_y < pwarn_y0 + 6'd5);
-    // REV3: gold star rising from the hero after a crate (30 ticks)
+    // gold star rising from the hero after a crate (30 ticks)
     wire signed [8:0]  pop_x0 = hx + 9'sd3;
     wire signed [9:0]  pop_y0 = $signed({hy[8], hy}) - 10'sd4 - $signed({5'd0, (5'd30 - pop_timer)});
     wire signed [9:0]  pop_row = $signed({4'd0, pixel_y}) - pop_y0;
@@ -872,12 +872,12 @@ module render_engine (
             s1_icon_id  = 3'd3;
             s1_icon_col = (pixel_x - arrow_x0[6:0]) >> 1;   // 2x scale
             s1_icon_row = (pixel_y - arrow_y0) >> 1;
-        end else if (in_pwarn_box) begin   // REV3: plane warning on the side edge
+        end else if (in_pwarn_box) begin   // plane warning on the side edge
             s1_in_icon  = 1'b1;
             s1_icon_id  = 3'd2;
             s1_icon_col = pixel_x - pwarn_x0;
             s1_icon_row = pixel_y - pwarn_y0;
-        end else if (in_pop_star) begin    // REV3: crate star pop-up
+        end else if (in_pop_star) begin    // crate star pop-up
             s1_in_icon  = 1'b1;
             s1_icon_id  = 3'd4;
             s1_icon_col = px_raw - pop_x0;
@@ -955,7 +955,7 @@ module render_engine (
         end
     endfunction
 
-    // REV4: HOME prompt icons. Right arrow 9x7 (shaft + stepped head), circle 7x7.
+    // HOME prompt icons. Right arrow 9x7 (shaft + stepped head), circle 7x7.
     function arrow_px; input [2:0] r; input [3:0] c;
         reg [8:0] bits;
         begin
@@ -984,32 +984,32 @@ module render_engine (
     endfunction
     reg [5:0] hy7;
 
-    // REV3: message strings (max 16 chars), left edge so the text is centred
+    // message strings (max 16 chars), left edge so the text is centred
     reg [127:0] msg_str;  reg [4:0] msg_len;  reg [6:0] msg_x0;
     always @* begin
         case (msg_id)
             4'd1:    begin msg_str = "AVOID BIRDS";      msg_len = 5'd11; end
             4'd2:    begin msg_str = "GRAB CRATES";      msg_len = 5'd11; end
             4'd3:    begin msg_str = "WIND! STEER";      msg_len = 5'd11; end
-            4'd4:    begin msg_str = "C ON GREEN";       msg_len = 5'd10; end   // REV4: shorter (was cut off by the flare lane)
+            4'd4:    begin msg_str = "C ON GREEN";       msg_len = 5'd10; end   // shorter (was cut off by the flare lane)
             4'd5:    begin msg_str = "STRONGER WIND";    msg_len = 5'd13; end
             4'd6:    begin msg_str = "DEBRIS ABOVE!";    msg_len = 5'd13; end
             4'd7:    begin msg_str = "PLANES! TUG UP";   msg_len = 5'd14; end
             4'd8:    begin msg_str = "FINAL DESCENT";    msg_len = 5'd13; end
-            4'd10:   begin msg_str = "STUNNED!";         msg_len = 5'd8;  end   // REV6
+            4'd10:   begin msg_str = "STUNNED!";         msg_len = 5'd8;  end   
             default: begin msg_str = "REPAIRED!";        msg_len = 5'd9;  end
         endcase
         msg_x0 = (7'd97 - (msg_len * 7'd6)) >> 1;
     end
 
-    // REV4: levels 1, 3 (day) and 5 (sunset) have light skies -> dark HUD text
+    // levels 1, 3 (day) and 5 (sunset) have light skies -> dark HUD text
     wire light_bg = (level == 3'd1) || (level == 3'd3) || (level == 3'd5);
     wire [4:0] hud_txt_col = light_bg ? 5'd7 : 5'd2;    // navy on light skies, white at night
     wire [4:0] hud_hi_col  = light_bg ? 5'd7 : 5'd10;   // navy on light skies, gold at night
 
     // FIX #14 / #5: when to show the "PRESS C" prompt
-    // REV6: shown for the WHOLE deploy window, from the moment the lock disappears
-    // REV9: only once the lock icon has gone - exactly when C starts to work
+    // shown for the WHOLE deploy window, from the moment the lock disappears
+    // only once the lock icon has gone - exactly when C starts to work
     wire press_c_on = ((game_state == S_FREEFALL_WINDOW) && (state_timer >= T_UNLOCK_ANIM)) ||
                       ((game_state == S_FINAL_APPROACH) &&
                        (alt_metres <= FLARE_SOFT_HI) && (alt_metres >= FLARE_SOFT_LO));
@@ -1050,7 +1050,7 @@ module render_engine (
             char_idx      = div6(tx);
             char_rem      = tx - (char_idx * 7'd6);
             s1_text_row   = ty[2:0];
-            s1_text_color = hud_txt_col;      // REV4: dark on light skies
+            s1_text_color = hud_txt_col;      // dark on light skies
             if (char_rem < 7'd5) begin
                 s1_in_text  = 1'b1;
                 s1_text_col = char_rem[2:0];
@@ -1068,16 +1068,16 @@ module render_engine (
         //     - deploy: perfect window 1,550-1,450 m (LED gauge full)
         //     - landing flare: soft (green) window
         // ---------------------------------------------------------------
-        // REV4: moved from the top to the middle of the screen (rows 44-50)
+        // moved from the top to the middle of the screen (rows 44-50)
         else if (press_c_on && blink_4hz &&
                  (pixel_y >= 6'd26 && pixel_y < 6'd33) &&
                  (pixel_x >= 7'd28 && pixel_x < 7'd69)) begin
-            ty            = pixel_y - 6'd26;      // REV4: mid-screen
+            ty            = pixel_y - 6'd26;      // mid-screen
             tx            = pixel_x - 7'd28;
             char_idx      = div6(tx);
             char_rem      = tx - (char_idx * 7'd6);
             s1_text_row   = ty[2:0];
-            s1_text_color = hud_hi_col;       // REV4: navy on light skies, gold at night
+            s1_text_color = hud_hi_col;       // navy on light skies, gold at night
             if (char_rem < 7'd5) begin
                 s1_in_text  = 1'b1;
                 s1_text_col = char_rem[2:0];
@@ -1094,16 +1094,16 @@ module render_engine (
         end
 
         // -------------------------------------------------------------
-        // 1c. REV3 guidance text (gold, centred, rows 32-38)
+        // guidance text (gold, centred, rows 32-38)
         // -------------------------------------------------------------
-        else if (msg_on && (pixel_y >= 6'd35 && pixel_y < 6'd42) &&   // REV4: just below PRESS C
+        else if (msg_on && (pixel_y >= 6'd35 && pixel_y < 6'd42) &&   // just below PRESS C
                  (pixel_x >= msg_x0) && (pixel_x < msg_x0 + {msg_len, 2'b00} + {msg_len, 1'b0})) begin
             ty            = pixel_y - 6'd35;
             tx            = pixel_x - msg_x0;
             char_idx      = div6(tx);
             char_rem      = tx - (char_idx * 7'd6);
             s1_text_row   = ty[2:0];
-            // REV4: darker text on light skies (navy; REPAIRED! dark green)
+            // darker text on light skies (navy; REPAIRED! dark green)
             s1_text_color = (msg_id == 4'd9) ? (light_bg ? 5'd13 : 5'd19) : hud_hi_col;
             if (char_rem < 7'd5 && char_idx < msg_len) begin
                 s1_in_text   = 1'b1;
@@ -1179,7 +1179,7 @@ module render_engine (
                 end
             end
 
-            // (c) REV4 bottom prompt: [left arrow] [right arrow]  (circle) GO
+            // bottom prompt: [left arrow] [right arrow]  (circle) GO
             //     y = 52..58. Arrows = choose level (BTNL / BTNR),
             //     circle = centre button (BTNC) = start.
             if (pixel_y >= 6'd52 && pixel_y < 6'd59) begin
@@ -1541,7 +1541,7 @@ module render_engine (
                                 default: s1_in_text = 1'b0;
                             endcase
                         end
-                        3'd4: begin // REV6 FR_KNOCKED_OUT: "KNOCKED OUT"
+                        3'd4: begin // FR_KNOCKED_OUT: "KNOCKED OUT"
                             case (char_idx)
                                 4'd0: s1_text_char = "K"; 4'd1: s1_text_char = "N"; 4'd2: s1_text_char = "O";
                                 4'd3: s1_text_char = "C"; 4'd4: s1_text_char = "K"; 4'd5: s1_text_char = "E";
@@ -1861,7 +1861,7 @@ module render_engine (
             else if (s2_in_obs && (rom_obs_color != 5'd0))
                 chosen_idx = rom_obs_color;               // Layer 6: Obstacles
             else if (s2_in_crate && (rom_crate_color != 5'd0))
-                // REV3: medic crate glow - its black border pulses bright green
+                // medic crate glow - its black border pulses bright green
                 chosen_idx = ((rom_crate_color == 5'd1) && anim_tick_cnt[3]) ? 5'd19 : rom_crate_color; // Layer 5
             else if (s2_in_ground)
                 chosen_idx = s2_ground_color;             // Layer 4: Ground & landing spot
