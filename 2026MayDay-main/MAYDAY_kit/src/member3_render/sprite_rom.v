@@ -1,7 +1,7 @@
-// =====================================================================
-// sprite_rom.v  --  MEMBER 3 (Unified Sprite & HUD Icon ROM)
+// =======================================================================
+// sprite_rom.v - HUD Icon and Combined Sprites - MEMBER 3 
 // Stores 5-bit palette indices (0 = transparent).
-// =====================================================================
+// ======================================================================
 module sprite_rom (
     input  wire [2:0] hero_pose,
     input  wire       hero_mirror,
@@ -38,9 +38,9 @@ module sprite_rom (
                      POSE_DMG_FLAP1 = 3'd4,
                      POSE_DMG_FLAP2 = 3'd5,
                      POSE_CRUMPLED  = 3'd6,
-                     POSE_BRAKE     = 3'd7;   // NEW (FIX #12)
+                     POSE_BRAKE     = 3'd7;
 
-    localparam [4:0] MG = 5'd19;   // REV3: medic green (palette 19)
+    localparam [4:0] MG = 5'd19;
 
     // 1. HERO SPRITE ROM
     wire [3:0] h_col_eff = hero_mirror ? (4'd15 - hero_col) : hero_col;
@@ -154,8 +154,8 @@ module sprite_rom (
                     default: hero_row_bits = 80'd0;
                 endcase
             end
-            POSE_BRAKE: begin  // NEW (FIX #12): both toggles pulled - canopy edges
-                               // deflected down, lines taut, hands pulled to the waist
+            POSE_BRAKE: begin  
+                              
                 case (hero_row)
                     5'd0:  hero_row_bits = {__,__,__,__,KK,KK,KK,KK,KK,KK,KK,KK,__,__,__,__};
                     5'd1:  hero_row_bits = {__,__,KK,KK,OO,OO,OO,OO,OO,OO,OO,OO,KK,KK,__,__};
@@ -315,7 +315,6 @@ module sprite_rom (
             4'd2: crate_row_bits = {GG,__,__,__,__,GG};
             4'd3: crate_row_bits = {__,GG,__,__,GG,__};
             4'd4: crate_row_bits = {KK,KK,KK,KK,KK,KK};
-            // REV3: green medic crate with a white plus (heals a snapped line)
             4'd5: crate_row_bits = {KK,MG,WW,WW,MG,KK};
             4'd6: crate_row_bits = {KK,WW,WW,WW,WW,KK};
             4'd7: crate_row_bits = {KK,MG,WW,WW,MG,KK};
@@ -325,7 +324,7 @@ module sprite_rom (
         crate_color = crate_row_bits[(3'd5 - crate_col) * 5 +: 5];
     end
 
-    // 4. HUD / MENU ICON ROM
+    // 4. HUD
     reg [44:0] icon_row_bits;
     always @* begin
         icon_row_bits = 45'd0;
@@ -362,7 +361,7 @@ module sprite_rom (
                     default: icon_row_bits = 45'd0;
                 endcase
             end
-            3'd3: begin // REV5: big landing arrow (9x9, drawn at 2x = 18x18), gold with black outline
+            3'd3: begin // REV5: big landing arrow
                 case (icon_row)
                     4'd0: icon_row_bits = {__,__,KK,KK,KK,KK,KK,__,__};
                     4'd1: icon_row_bits = {__,__,KK,YY,YY,YY,KK,__,__};
@@ -376,7 +375,7 @@ module sprite_rom (
                     default: icon_row_bits = 45'd0;
                 endcase
             end
-            3'd4: begin // Star (9x9)
+            3'd4: begin // Star
                 case (icon_row)
                     4'd0: icon_row_bits = {__,__,__,__,YY,__,__,__,__};
                     4'd1: icon_row_bits = {__,__,__,YY,YY,YY,__,__,__};
