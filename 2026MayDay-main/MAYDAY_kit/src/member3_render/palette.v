@@ -1,9 +1,9 @@
-// =====================================================================
+// =======================================================================
 // palette.v  --  MEMBER 3 (32-entry RGB565 Colour Palette & Swapper)
 // Translates a 5-bit sprite/layer colour index into 16-bit RGB565.
 // Environment indices (3, 4, 12, 13, 15) swap based on level setting
 // during gameplay; menus always use the Day palette.
-// =====================================================================
+// ============================================================================
 module palette (
     input  wire [4:0]  color_idx,
     input  wire [2:0]  level,
@@ -36,7 +36,7 @@ module palette (
             5'd3: begin               // Clouds
                 case (setting)
                     SET_NIGHT:  rgb565 = 16'h298A;
-                    SET_SUNSET: rgb565 = 16'hFF9B;   // REV3: pale cream clouds on the lighter sunset sky
+                    SET_SUNSET: rgb565 = 16'hFF9B;
                     default:    rgb565 = 16'hDEDB;
                 endcase
             end
