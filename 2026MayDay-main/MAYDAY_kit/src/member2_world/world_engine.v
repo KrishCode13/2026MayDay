@@ -1,10 +1,7 @@
 `timescale 1ns / 1ps
 
 
-// =====================================================================
-// world_engine.v  -- (World and collision) only modifiable by Arun (member 2)
-// STATUS: FINAL PRODUCT: All CHECKPOINTS FULLY INTEGRATED
-// =====================================================================
+
 module world_engine (
     input  wire               clk,
     input  wire               rst,
