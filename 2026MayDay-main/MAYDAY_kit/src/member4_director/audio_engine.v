@@ -1,10 +1,5 @@
 // =====================================================================
 // audio_engine.v  --  MEMBER 4. Sound for the Digilent Pmod.
-//
-// The AMP2 has one audio input (AIN), its own low-pass filter and a class-D
-// amplifier, so the FPGA sends a fast 1-bit stream whose average level is
-// the sound: a first-order delta-sigma modulator at 100 MHz.
-//
 // Sound map (by game_state):
 //   lobby music  : HOME, LEVEL_INTRO, LEVEL_COMPLETE, LEVEL_FAILED, VICTORY
 //   soft wind    : CUTSCENE (plus explosion), CANOPY, FINAL_APPROACH
@@ -12,12 +7,6 @@
 //   death tune   : CRASH ("wah wah wah waaah")
 //   victory tune : LANDING (2 s)
 //   SW1 = mute (amp shut down, output silent)
-// All tunes are ORIGINAL compositions.
-//   Lobby: 100 bpm pop groove, I-V-vi-IV in C, plucked syncopated lead,
-//          bouncing 3-3-2 bass, kick on beats 1 and 3, clap on 2 and 4.
-// Wind = noise through a 2-pole low-pass whose loudness AND brightness follow
-// a gust envelope (swell ~1 s, fade ~2 s, random peak each gust) - a periodic
-// "whoosh" instead of constant static.
 // =====================================================================
 module audio_engine (
     input  wire       clk,            // 100 MHz
@@ -37,10 +26,10 @@ module audio_engine (
 );
     `include "game_params.vh"
 
-    assign amp_gain       = 1'b1;     // 6 dB (quieter, safer for headphones)
+    assign amp_gain       = 1'b1;     // 6 dB 
     assign amp_shutdown_n = ~mute;
 
-    // ---------------- sample clock: 100 MHz / 4096 = 24.4 kHz ----------------
+    // sample clock: 100 MHz / 4096 = 24.4 kHz
     reg [11:0] sdiv = 12'd0;
 `ifdef AUDIO_FAST
     wire       sample_en = (sdiv[3:0] == 4'd0);   // simulation only: 16x faster, same sound
@@ -49,7 +38,7 @@ module audio_engine (
 `endif
     always @(posedge clk) sdiv <= sdiv + 12'd1;
 
-    // ---------------- note table: 24-bit phase step per sample ----------------
+    // note table: 24-bit phase step per sample
     function [23:0] note_inc; input [6:0] n;
         case (n)
             7'd40: note_inc = 24'd56630;   // E2 82.4 Hz
@@ -106,7 +95,7 @@ module audio_engine (
         endcase
     endfunction
 
-    // ---------------- ORIGINAL tunes ----------------
+    // ORIGINAL tunes 
     // Lobby: 64 sixteenth-notes at 100 bpm (0.15 s each) = 9.6 s loop
     function [6:0] lobby_mel; input [5:0] i;
         case (i)
@@ -312,11 +301,11 @@ module audio_engine (
         endcase
     endfunction
 
-    // ---------------- which sound ----------------
     // sound map: gameplay is EVENT-driven - plane > wind > bird > silence.
     // The cutscene and plain falling are silent.
     localparam M_MUSIC = 3'd0, M_SOFT = 3'd1, M_LOUD = 3'd2, M_VICTORY = 3'd3, M_DEATH = 3'd4,
                M_SILENT = 3'd5, M_PLANE = 3'd6, M_BIRD = 3'd7;
+               
     // chirp only for 1 s after each new bird (not the whole time it is on screen)
     reg [14:0] bird_t = 15'd0;
     reg        bird_new_l = 1'b0;
@@ -336,7 +325,7 @@ module audio_engine (
     end
     reg [2:0] mode_d = 3'd0;
 
-    // ---------------- sequencer ----------------
+    // sequence
     reg [12:0] step_cnt = 13'd0;
     reg [5:0]  step = 6'd0;
     wire [12:0] step_len = (mode == M_VICTORY) ? 13'd3052 : 13'd3662;   // 0.125 s / 0.15 s
@@ -350,7 +339,7 @@ module audio_engine (
     reg [5:0]  clap_env = 6'd0;
     reg [6:0]  vib = 7'd0;            // vibrato counter for the last death note
 
-    // ---------------- noise, gusting wind, explosion ----------------
+    // noise, gusting wind, explosion 
     reg [15:0] lfsr = 16'hACE1;
     wire signed [11:0] noise = {{4{lfsr[7]}}, lfsr[7:0]};   // -128..127
     reg signed [11:0] w1 = 12'sd0, w2 = 12'sd0;   // 2-pole low-pass
@@ -394,11 +383,11 @@ module audio_engine (
         if (rst) begin
             step <= 6'd0; step_cnt <= 13'd0; ph_mel <= 24'd0; ph_bass <= 24'd0;
             boom_env <= 10'd0; mix <= 12'sd0; mode_d <= M_MUSIC;
-        end else if (sample_en && !pause) begin            // everything freezes while paused
+        end else if (sample_en && !pause) begin  // everything freezes while paused
             mode_d <= mode;
             if (bird_new_l)            bird_t <= 15'd24414;     // 1 s
             else if (bird_t != 15'd0)  bird_t <= bird_t - 15'd1;
-            if (mode != mode_d) begin                       // new sound: start from the top
+            if (mode != mode_d) begin    // new sound: start from the top
                 step <= 6'd0; step_cnt <= 13'd0; env <= 6'd63;
             end else if (step_cnt >= step_len - 1) begin
                 step_cnt <= 13'd0;
@@ -406,11 +395,11 @@ module audio_engine (
                 if (mode == M_VICTORY || mode == M_DEATH)
                     step <= (step[3:0] == 4'd15) ? step : step + 6'd1;   // play once, hold the end
                 else
-                    step <= step + 6'd1;                                   // 64-step loop
+                    step <= step + 6'd1;     // 64-step loop
                 // drums on the lobby groove
                 if (mode == M_MUSIC && step[1:0] == 2'b11) begin
                     if (step[3:2] == 2'b11 || step[3:2] == 2'b01) begin clap_env <= 6'd40; end  // beats 2, 4
-                    else begin kick_env <= 6'd60; kick_inc <= note_inc(7'd52); end           // beats 1, 3
+                    else begin kick_env <= 6'd60; kick_inc <= note_inc(7'd52); end  // beats 1, 3
                 end
             end else begin
                 step_cnt <= step_cnt + 13'd1;
@@ -421,7 +410,7 @@ module audio_engine (
                 if (step_cnt[4:0] == 5'd0) begin
                     if (kick_env != 6'd0) kick_env <= kick_env - 6'd2;
                     if (clap_env != 6'd0) clap_env <= clap_env - 6'd2;
-                    kick_inc <= kick_inc - (kick_inc >> 4);                    // pitch drop
+                    kick_inc <= kick_inc - (kick_inc >> 4);     // pitch drop
                 end
             end
             vib <= vib + 7'd1;
@@ -436,7 +425,7 @@ module audio_engine (
             w1   <= w1 + step1;
             w2   <= w2 + (d2 >>> 2);
             gdiv <= gdiv + 9'd1;
-            if (gdiv[6:0] == 7'd0) begin                                   // ~5 ms steps
+            if (gdiv[6:0] == 7'd0) begin      // ~5 ms steps
                 // the whoosh swells in when a gust starts and fades when it ends
                 if (mode == M_LOUD) begin if (gust < 8'd230) gust <= gust + 8'd3; end
                 else if (mode == M_SOFT && scene_wind) begin   // gentle steady cabin wind
@@ -460,7 +449,7 @@ module audio_engine (
             ph_e2 <= ph_e2 + 24'd116820;     // ~170 Hz
             prop  <= prop + 12'd2;           // ~12 Hz throb
 
-            // ---- mixer (about -300..300) ----
+            // mixer (about -300..300)
             case (mode)
                 M_MUSIC:            mix <= mel_sq + bass_sq + kick_sq + clap_n;
                 M_VICTORY, M_DEATH: mix <= mel_sq + bass_sq;
@@ -473,7 +462,7 @@ module audio_engine (
         end
     end
 
-    // ---------------- 1st-order delta-sigma DAC at 100 MHz ----------------
+    // 1st-order delta-sigma DAC at 100 MHz 
     wire [9:0] level = (mute || pause) ? 10'd512 : (10'd512 + mix[9:0]);   // pause = silent
     reg  [10:0] acc = 11'd0;
     always @(posedge clk) begin
