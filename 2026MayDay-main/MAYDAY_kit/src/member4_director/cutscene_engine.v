@@ -1,38 +1,7 @@
-// =====================================================================
-// cutscene_engine.v  --  MEMBER 4. The 21-second opening cutscene.
-// Ports unchanged from the kit (FINAL).
-//
+
 // STATUS (CP3a): scenes 1 Boarding, 3 Flight, 4 Explosion, 5 Jump.
 //   Scene 2 (Briefing) shows a plain cabin colour until font_rom.v arrives.
-//
-// HOW IT WORKS (Q&A order)
-//  1. Timeline: own tick counter t (0..1260); scene = which band t is in.
-//  2. Keyframe ROM: rows of {start tick, object, duration code, hide,
-//     x0, y0, x1, y1}, sorted by start tick. Durations are 32/64/128/256
-//     ticks = 2^n.
-//  3. Loader: between game ticks, a pointer walks the ROM; every row whose
-//     start tick has arrived is loaded into its object, one row per clock:
-//         pos  = start (Q8.8)
-//         step = ((end - start) << 8) >>> n      <- the "divide" is a shift
-//         cnt  = 2^n
-//  4. Mover: on every game_tick, each object with cnt > 0 does
-//         pos = pos + step;  cnt = cnt - 1
-//     No multiplier, no divider. With whole-pixel endpoints and n <= 8,
-//     step = (end - start) * 2^(8-n) exactly, so the object lands exactly
-//     on its end pixel with no rounding drift.
-//  5. Pixel pipeline (3 clocks; a pixel lasts 16 clocks, so this is free):
-//       A: geometry  - where is this pixel relative to each object?
-//       B: sprites   - read sprite ROMs, pick the front-most colour index
-//       C: palette   - index -> RGB565 for the selected level's setting
-//  6. Explosion (scene 4): 12 particles start at the engine with velocities
-//     from a 12-direction lookup table. Every tick, for each live particle:
-//         pos = pos + vel;   vy = vy + GRAVITY;   age = age + 1
-//     so they burst outward, then arc downward; they die at age 36.
-//     Colour follows age: gold -> orange -> red -> grey.
-//     Plus a 3-frame white flash, a +/-2 px shake, and a smoke trail
-//     (8 puffs in a ring buffer, one emitted every 8 ticks, growing and
-//     drifting back).
-// =====================================================================
+
 module cutscene_engine (
     input  wire        clk,
     input  wire        rst,
@@ -42,10 +11,10 @@ module cutscene_engine (
     input  wire [6:0]  pixel_x,
     input  wire [5:0]  pixel_y,
     output reg  [15:0] oled_data_cut,
-    input  wire        center_press,   // REV6: C skips (see skip rules below)
+    input  wire        center_press,   // C skips (see skip rules below)
     output reg         cutscene_done,  // high when the animation + this level's pages end
-    output reg         explode = 1'b0, // REV4: 1-cycle pulse when the plane explodes (audio)
-    output wire        scene_wind      // REV7: animation playing (not the pages) -> soft wind
+    output reg         explode = 1'b0, //  1-cycle pulse when the plane explodes (audio)
+    output wire        scene_wind      // animation playing (not the pages) -> soft wind
 );
     `include "game_params.vh"
 
@@ -71,9 +40,8 @@ module cutscene_engine (
                      P_CABIN = 5'd20, P_TARMAC = 5'd21,
                      P_TIE = 5'd30, P_SHIRT = 5'd31;   // sprite markers, replaced per person
 
-    // =================================================================
+
     // 2. KEYFRAME ROM (sorted by start tick; last row is a sentinel)
-    // =================================================================
     function [48:0] KF;   // pack one row
         input integer start, obj, dcode, hide, x0, y0, x1, y1;
         KF = {start[10:0], obj[2:0], dcode[1:0], hide[0],
@@ -149,7 +117,7 @@ module cutscene_engine (
     end
 
     // =================================================================
-    // NEW: slow-motion jump + instruction screens
+    // slow-motion jump + instruction screens
     //   jump_done  : the 5 animated scenes have finished (t reached the end)
     //   cut_tick   : the tick the animation actually uses. During scene 5 (the
     //                jump) only 1 of every CUT_JUMP_SLOW ticks gets through, so
@@ -158,7 +126,7 @@ module cutscene_engine (
     //   txt_t      : ticks spent on the text screens
     // =================================================================
     reg        jump_done;
-    // REV6: pages per level and the C-skip rules
+    // pages per level and the C-skip rules
     //   animation playing: level 1/3/4 -> jump to this level's pages (skip the rest)
     //                      level 2/5   -> jump to the hero falling out of the plane
     //   pages showing    : C starts the level
@@ -171,7 +139,7 @@ module cutscene_engine (
         else if (center_press)                     skip_req <= 1'b1;
         else if (game_tick)                        skip_req <= 1'b0;
     reg [1:0]  slow_cnt;
-    reg [9:0]  txt_t;   // REV5: 10 bits (controls + mission + 3 slides = 870 ticks)
+    reg [9:0]  txt_t;   // 10 bits (controls + mission + 3 slides = 870 ticks)
     wire       in_jump  = (t >= CUT_S4_END);
     wire       cut_tick = game_tick && !jump_done && (!in_jump || (slow_cnt == 2'd0) || skip_req);
     initial begin jump_done = 0; slow_cnt = 0; txt_t = 0; cutscene_done = 0; end
@@ -183,7 +151,7 @@ module cutscene_engine (
             slow_cnt <= (slow_cnt == CUT_JUMP_SLOW - 1) ? 2'd0 : slow_cnt + 2'd1;
             if (jump_done) begin
                 txt_t <= txt_t + 10'd1;
-                // REV6: level 1 = controls + mission + 3 slides; levels 3 and 4 = one slide
+                // level 1 = controls + mission + 3 slides; levels 3 and 4 = one slide
                 // for the new obstacle; levels 2 and 5 = no pages. C on a page = start now.
                 if ((txt_t >= txt_len - 1) || skip_req) cutscene_done <= 1'b1;
             end
@@ -197,15 +165,15 @@ module cutscene_engine (
             t <= 11'd0;  kf_ptr <= 6'd0;  vis <= 0;  jump_done <= 1'b0;
             for (k = 0; k < NOBJ; k = k + 1) cnt[k] <= 9'd0;
         end else if (cut_tick) begin   // NEW: was game_tick (slow-mo jump, frozen during text)
-            // MOVER: one step for every moving object, once per tick.
-            // REV4: scene 2 is a 1 s title card; then skip the rest of scene 2
+            // one step for every moving object, once per tick.
+            // scene 2 is a 1 s title card; then skip the rest of scene 2
             if (skip_req && has_pages)
-                jump_done <= 1'b1;                                   // REV6: straight to the pages
+                jump_done <= 1'b1;                                   // straight to the pages
             if (skip_req && !has_pages && (t < CUT_S4_END))
-                t <= CUT_S4_END[10:0];                               // REV6: straight to the jump
+                t <= CUT_S4_END[10:0];                               // straight to the jump
             else
             t <= (t == CUT_S1_END + CUT_TITLE_TICKS - 1) ? CUT_S2_END[10:0] : t + 1'b1;
-            explode <= (t == CUT_S3_END - 1);   // REV4: explosion sound trigger
+            explode <= (t == CUT_S3_END - 1);   // explosion sound trigger
             if (t >= CUT_TOTAL - 1) jump_done <= 1'b1;
             for (k = 0; k < NOBJ; k = k + 1)
                 if (cnt[k] != 9'd0) begin
@@ -227,7 +195,6 @@ module cutscene_engine (
         end
     end
 
-    // =================================================================
     // 6. EXPLOSION ENGINE: 12 particles + smoke ring buffer
     // =================================================================
     localparam NPART = 12, NSMOKE = 8;
@@ -326,7 +293,6 @@ module cutscene_engine (
     // Setting from level: 0 day (1, 3), 1 night city (2, 4), 2 sunset (5)
     wire [1:0] setting = (level == 3'd5) ? 2'd2 : (level[0] ? 2'd0 : 2'd1);
 
-    // =================================================================
     // SPRITE ROMS (generated from ASCII art by tools/gen_cutscene_sprites.py)
     // Row r of a sprite is one wide constant; column c sits in bits
     // [5c+4 : 5c] as a 5-bit palette index (0 = transparent).
@@ -438,7 +404,6 @@ module cutscene_engine (
         part_colour = (age < 8) ? P_GOLD : (age < 16) ? P_ORANGE : (age < 26) ? P_RED : P_GREY;
     endfunction
 
-    // =================================================================
     // 5A. GEOMETRY STAGE: is this pixel inside each object? where?
     // =================================================================
     // Screen shake (scene 4): sample the picture 2 px left/right on
@@ -538,7 +503,7 @@ module cutscene_engine (
         a_flash <= (t >= CUT_S3_END) && (t < CUT_S3_END + CUT_FLASH_TICKS);
     end
 
-    // =================================================================
+
     // 5B. SPRITE STAGE: read ROMs, choose the front-most colour
     // =================================================================
     wire [JET_W*5-1:0] jrow = spr_jet_row(a_jet_ry);
@@ -606,7 +571,7 @@ module cutscene_engine (
         endcase
     end
 
-    // =================================================================
+
     // 5C. PALETTE STAGE (ICD colour table; setting-dependent 3, 4, 12, 13, 15)
     // TODO(integration): replace with Member 3's palette.v once its ports
     // are known, so the palette exists in exactly one place.
@@ -616,7 +581,7 @@ module cutscene_engine (
         case (idx)
             5'd1:  pal = 16'h0000;
             5'd2:  pal = 16'hFFFF;
-            5'd3:  pal = (set == 2'd0) ? 16'hDEDB : (set == 2'd1) ? 16'h298A : 16'hFF9B;   // REV3 sunset clouds
+            5'd3:  pal = (set == 2'd0) ? 16'hDEDB : (set == 2'd1) ? 16'h298A : 16'hFF9B;   // sunset clouds
             5'd4:  pal = (set == 2'd1) ? 16'hC618 : 16'h528A;
             5'd5:  pal = 16'hFC60;
             5'd6:  pal = 16'hC280;
@@ -639,7 +604,6 @@ module cutscene_engine (
         endcase
     endfunction
 
-    // =================================================================
     // NEW 5D. INSTRUCTION SCREENS (after the slow-motion jump)
     //   Screen 0 "CONTROLS" for CUT_CTRL_TICKS, then screen 1 "MISSION".
     //   Text uses Member 3's shared font_rom (5x7 glyphs, 6 px pitch).
@@ -654,13 +618,13 @@ module cutscene_engine (
     endfunction
 
     wire        scr = (txt_t >= CUT_CTRL_TICKS);      // 0 = controls, 1 = mission (and slides)
-    // REV5: 3 tutorial slides after MISSION: 1 avoid birds, 2 grab crates, 3 land on the star
+    // 3 tutorial slides after MISSION: 1 avoid birds, 2 grab crates, 3 land on the star
     // slide: 0 none (controls/mission), 1 birds, 2 crates, 3 land, 4 debris (L3), 5 planes (L4)
     wire [2:0]  slide = (level == 3'd3) ? 3'd4 : (level == 3'd4) ? 3'd5 :
                         (txt_t < CUT_CTRL_TICKS + CUT_GOAL_TICKS) ? 3'd0 :
                         (txt_t < CUT_CTRL_TICKS + CUT_GOAL_TICKS + CUT_SLIDE_TICKS) ? 3'd1 :
                         (txt_t < CUT_CTRL_TICKS + CUT_GOAL_TICKS + 2*CUT_SLIDE_TICKS) ? 3'd2 : 3'd3;
-    // REV4 title card state
+    //  title card state
     reg         title_mode;
     reg  [6:0]  tl_x0;  reg [5:0] tl_y0;
     wire [47:0] title_str = "MAYDAY";
@@ -687,13 +651,13 @@ module cutscene_engine (
             else      begin l_str = "AVOID BIRDS";    l_len = 5'd11; l_x0 = 7'd15; end end
         else if (a_y >= 6'd32 && a_y < 6'd39) begin l_y0 = 6'd32;
             if (!scr) begin l_str = "L/R: STEER";     l_len = 5'd10; l_x0 = 7'd6;  end
-            else      begin l_str = "AVOID DEBRIS";   l_len = 5'd12; l_x0 = 7'd12; end end   // REV4
+            else      begin l_str = "AVOID DEBRIS";   l_len = 5'd12; l_x0 = 7'd12; end end   
         else if (a_y >= 6'd44 && a_y < 6'd51) begin l_y0 = 6'd44;
             if (!scr) begin l_str = "C  : OPEN/LAND"; l_len = 5'd14; l_x0 = 7'd6;  end
             else      begin l_str = "COLLECT CRATES"; l_len = 5'd14; l_x0 = 7'd6;  end end
         else l_on = 1'b0;
 
-        // REV5: slides have a gold title (row 4) and a white caption (row 53)
+        // slides have a gold title (row 4) and a white caption (row 53)
         if (slide != 3'd0) begin
             l_on = 1'b0;  l_gold = 1'b0;
             if (a_y >= 6'd4 && a_y < 6'd11) begin
@@ -724,8 +688,8 @@ module cutscene_engine (
         t_char = l_str[8*(l_len - 1 - ci) +: 8];
         t_row  = a_y - l_y0;
         t_col  = crem[2:0];
-        // REV6: "C: SKIP" hint in the bottom-right corner while the animation plays
-        // REV7: "PRESS C TO SKIP", top centre, black (white on the night levels)
+        // "C: SKIP" hint in the bottom-right corner while the animation plays
+        // "PRESS C TO SKIP", top centre, black (white on the night levels)
         if (!jump_done && !title_mode) begin
             tx_c    = a_x - 7'd3;
             ci      = div6c(tx_c);
@@ -736,10 +700,10 @@ module cutscene_engine (
             t_col   = crem[2:0];
             l_gold  = 1'b1;
         end
-        // REV4: title card - "MAYDAY" at double size, centred, with an
+        // title card - "MAYDAY" at double size, centred, with an
         // earthquake shake (offset changes every tick from the tick counter)
         if (title_mode) begin
-            tl_x0  = 7'd13;        // REV5: no shake; 6 chars x 12 px = 70 px wide
+            tl_x0  = 7'd13;        // no shake; 6 chars x 12 px = 70 px wide
             tl_y0  = 6'd25;        // 14 px tall
             tx_c   = (a_x - tl_x0) >> 1;
             ci     = div6c(tx_c);
@@ -756,7 +720,7 @@ module cutscene_engine (
     wire [4:0] t_pix;
     font_rom u_cut_font (.char_code(t_char), .row(t_row), .pixels(t_pix));
 
-    // ---------------- REV5 slide pictures ----------------
+    // ---------------- slide pictures ----------------
     // codes: 0 none, 1 black, 2 white, 3 grey, 4 gold, 5 green, 6 red
     function [2:0] sl_bird; input [3:0] r; input [3:0] c;
         reg [23:0] row;
@@ -889,7 +853,7 @@ module cutscene_engine (
         endcase
     endfunction
     reg [2:0] b_pic = 3'd0;
-    reg       b_rect = 1'b0;     // REV5: black box behind the title
+    reg       b_rect = 1'b0;     // black box behind the title
     always @(posedge clk) begin
         b_pic  <= pic;
         b_rect <= (a_x >= 7'd7) && (a_x < 7'd89) && (a_y >= 6'd19) && (a_y < 6'd45);
@@ -904,8 +868,8 @@ module cutscene_engine (
 
     // Output: text screens after the jump, otherwise the animated scene.
     always @(posedge clk)
-        oled_data_cut <= b_title    ? (b_txt_on ? 16'hFEA0 : b_rect ? 16'h0000 : 16'hFFFF) :   // REV5: yellow MAYDAY on a black box
-                         (jump_done && b_pic != 3'd0) ? pic_rgb(b_pic) :                       // REV5 slide pictures
-                         !jump_done ? (b_txt_on ? ((b_set == 2'd1) ? 16'hFFFF : 16'h0000) : pal(b_idx, b_set)) :   // REV7 hint
+        oled_data_cut <= b_title    ? (b_txt_on ? 16'hFEA0 : b_rect ? 16'h0000 : 16'hFFFF) :   //  yellow MAYDAY on a black box
+                         (jump_done && b_pic != 3'd0) ? pic_rgb(b_pic) :                       // slide pictures
+                         !jump_done ? (b_txt_on ? ((b_set == 2'd1) ? 16'hFFFF : 16'h0000) : pal(b_idx, b_set)) :   // hint
                          b_txt_on   ? (b_txt_gold ? 16'hFEA0 : 16'hFFFF) : 16'h194D;
 endmodule
