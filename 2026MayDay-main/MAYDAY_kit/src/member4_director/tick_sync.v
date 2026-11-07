@@ -1,5 +1,4 @@
-// tick_sync.v -- MEMBER 4. Working minimal version (2-FF synchroniser +
-// rising-edge detect + pause gate). Ports FINAL. Refine/own as needed.
+
 module tick_sync (
     input  wire clk,          // 100 MHz
     input  wire frame_begin,  // from Oled_Display (6.25 MHz domain)
