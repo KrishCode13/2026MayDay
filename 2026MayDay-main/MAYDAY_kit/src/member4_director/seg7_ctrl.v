@@ -1,15 +1,4 @@
-// =====================================================================
-// seg7_ctrl.v  --  MEMBER 4. Four-digit seven-segment display.
-// Ports unchanged from the kit (FINAL). Outputs are active low,
-// seg[0] = CA ... seg[6] = CG; an[0] = rightmost digit.
-//
-// Pipeline:
-//   1. Crash spin-down register (own 20 ms timer)
-//   2. Pick the number to show (altitude / spin / stars / total)
-//   3. Double dabble, one shift per clock (14 clocks per conversion)
-//   4. Pick 4 characters for the current state
-//   5. Multiplex: light one digit at a time, fast enough to look steady
-// =====================================================================
+
 module seg7_ctrl (
     input  wire        clk,
     input  wire [3:0]  game_state,
@@ -132,7 +121,7 @@ module seg7_ctrl (
         endcase
     endfunction
 
-    // ---- 5. Multiplexing ---------------------------------------------
+    //  5. Multiplexing
     // Only one digit is lit at a time. The top 2 bits of a free-running
     // counter choose which; each digit is on for 0.66 ms, so all four
     // refresh at ~380 Hz and the eye sees them all lit at once.
