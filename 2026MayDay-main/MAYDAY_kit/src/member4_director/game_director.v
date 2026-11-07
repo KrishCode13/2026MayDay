@@ -1,38 +1,18 @@
-// =====================================================================
-// game_director.v  --  MEMBER 4. Master state machine for MAYDAY.
-// Ports unchanged from the kit (FINAL, see docs/ICD.md).
-//
-// Structure (explain in this order at the Q&A):
-//   A. next-state logic   (combinational: "where do we go next?")
-//   B. state register     (sequential: move there, reset the timer,
-//                          do the one-off jobs of entering a state)
-//   C. menu cursor        (moves only on press pulses, clamped per menu)
-//   D. crates and stars   (count crates, latch stars at hero_landed,
-//                          keep the best per level, sum the total)
-//
-// Stub fixes in this version:
-//   1. cutscene_seen is NOT cleared by reset (power-on value only).
-//   2. CRASH lasts T_CRASH_IMPACT for fail_reason 3, else T_CRASH_PLUNGE.
-//   3. Every register has a power-on value (no X in simulation).
-//   4. All menu constants live in game_params.vh.
-// Also: hero_crash during FREEFALL_LOCKED/WINDOW now goes to CRASH
-// (ICD: "strikes in freefall count too"), otherwise the pulse is lost.
-// =====================================================================
 module game_director (
     input  wire        clk,
-    input  wire        rst,
-    input  wire        game_tick,
+    input  wire        rst,   //sw[15]
+    input  wire        game_tick,  
     input  wire        left_press,
     input  wire        right_press,
     input  wire        center_press,
-    input  wire        sw_skip,            // SW1
+    input  wire        sw_skip,            
     input  wire        cutscene_done,
     // from Member 1
     input  wire [23:0] altitude,
     input  wire        hero_crash,
-    input  wire [2:0]  crash_cause,     // REV6: 3 bits
+    input  wire [2:0]  crash_cause,     
     input  wire        hero_landed,
-    input  wire [1:0]  landing_grade,   // REV6: 0 soft, 1 hard, 2 very hard
+    input  wire [1:0]  landing_grade,   // 0 soft, 1 hard, 2 very hard -> user clicked the bar in green, yellow, red 
     input  wire        landed_on_spot,
     input  wire [1:0]  lines_snapped,
     // from Member 2
@@ -49,19 +29,18 @@ module game_director (
     output reg  [9:0]  best_stars,
     output reg  [3:0]  total_stars,
     output reg  [2:0]  crates_got,
-    output reg  [2:0]  fail_reason      // REV6: 3 bits (4 = knocked out)
+    output reg  [2:0]  fail_reason      
 );
     `include "game_params.vh"
 
     wire [15:0] alt_m = altitude[23:8];      // whole metres
 
-    reg [15:0] free_cnt;                     // free-running: seed source
-    reg        cutscene_seen;                // set once per power-on
+    reg [15:0] free_cnt;                     // free-running: seed source. Its to allow the randomness for different game items  
+    reg        cutscene_seen;                // always on. I just put this cuz in our game prep we dont include the cutscenes so we can focus on the game
     reg [3:0]  next_state;
     reg [2:0]  next_level;
 
     // ---- Power-on values (FPGA loads these at configuration) ---------
-    // cutscene_seen gets its 0 ONLY here, so SW15 reset cannot replay it.
     initial begin
         game_state = S_HOME;   level = 3'd1;       level_start = 1'b0;
         state_timer = 8'd0;    seed = 16'd1;       menu_cursor = 3'd0;
@@ -90,7 +69,7 @@ module game_director (
             S_HOME:
                 if (center_press) begin
                     next_level = menu_cursor + 3'd1;          // cursor 0..4 -> level 1..5
-                    next_state = S_CUTSCENE;                  // REV6: cutscene at every level (C skips)
+                    next_state = S_CUTSCENE;                 
                 end
             S_CUTSCENE:
                 if (cutscene_done || sw_skip) next_state = S_LEVEL_INTRO;
@@ -120,16 +99,16 @@ module game_director (
                         if (level == NUM_LEVELS) next_state = S_VICTORY;   // "DONE"
                         else begin
                             next_level = level + 3'd1;
-                            next_state = S_CUTSCENE;          // REV6: next level gets its cutscene too
+                            next_state = S_CUTSCENE;          // next level gets its cutscene too
                         end
                     end else if (menu_cursor == MC_RETRY)
-                        next_state = S_FREEFALL_LOCKED;       // REV6: retry = straight into freefall
+                        next_state = S_FREEFALL_LOCKED;       // retry = straight into freefall
                     else
                         next_state = S_HOME;
                 end
             S_LEVEL_FAILED:
                 if (center_press)
-                    next_state = (menu_cursor == MF_RETRY) ? S_FREEFALL_LOCKED : S_HOME;   // REV6: retry = straight into freefall
+                    next_state = (menu_cursor == MF_RETRY) ? S_FREEFALL_LOCKED : S_HOME;   // retry = straight into freefall
             S_VICTORY:
                 if (center_press) next_state = S_HOME;
             default:
@@ -192,7 +171,7 @@ module game_director (
 
                 if (next_state == S_CUTSCENE) cutscene_seen <= 1'b1;
 
-                // REV6: a retry jumps straight to FREEFALL_LOCKED, so it needs the
+               // a retry jumps straight to FREEFALL_LOCKED, so it needs the
                 // level_start pulse too (normally given on entry to LEVEL_INTRO)
                 if ((next_state == S_LEVEL_INTRO) ||
                     ((next_state == S_FREEFALL_LOCKED) && (game_state != S_LEVEL_INTRO))) begin
