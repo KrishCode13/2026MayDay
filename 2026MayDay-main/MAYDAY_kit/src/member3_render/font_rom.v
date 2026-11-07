@@ -1,8 +1,7 @@
-// =====================================================================
-// font_rom.v  --  SHARED 5x7 Font ROM (Member 3 menus & Member 4 cutscene)
-// Supports: 'A'-'Z' (and 'a'-'z'), '0'-'9' (both ASCII and raw 8'd0..9),
-// space, ':', '/', '+', '!', '-'.
-// =====================================================================
+// ===============================================================================
+// font_rom.v - For Member 3 menus and Member 4 cutscenes (5x7)
+// Supports: a-z, A-Z, 0-9 (ASCII and raw), space, :, /, +, !, -.
+// =========================================================================
 module font_rom (
     input  wire [7:0] char_code,
     input  wire [2:0] row,
