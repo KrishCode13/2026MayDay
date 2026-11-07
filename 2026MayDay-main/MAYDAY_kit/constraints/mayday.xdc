@@ -79,7 +79,7 @@ set_property PACKAGE_PIN P17 [get_ports {JC[6]}]
 set_property PACKAGE_PIN R18 [get_ports {JC[7]}]
 set_property IOSTANDARD LVCMOS33 [get_ports {JC[*]}]
 
-## REV4: Pmod AMP2 on JXADC (top row). JXADC[0]=pin1 AIN, [1]=pin2 GAIN, [2]=pin3 n/c, [3]=pin4 SHUTDOWN
+## Pmod AMP2 on JXADC (top row). JXADC[0]=pin1 AIN, [1]=pin2 GAIN, [2]=pin3 n/c, [3]=pin4 SHUTDOWN
 ## Check these pins against Basys3_Master.xdc (section "Pmod Header JXADC").
 set_property PACKAGE_PIN J3 [get_ports {JXADC[0]}]
 set_property PACKAGE_PIN L3 [get_ports {JXADC[1]}]
